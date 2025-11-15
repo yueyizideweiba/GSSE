@@ -2,6 +2,8 @@
 
 A semantic segmentation and editing tool based on 3D Gaussian Splatting, supporting interactive object segmentation and scene editing.
 
+![GSSE GUI Screenshot](images/gui.png)
+
 ## ✨ Key Features
 
 - **Interactive Segmentation**: Supports point-click and text-prompt based 3D object segmentation
