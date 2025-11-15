@@ -1,0 +1,1488 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GSSE Cesium 3DGS查看器</title>
+    
+    <!-- Cesium CSS - 使用本地文件 -->
+    <link href="./lib/Cesium/Widgets/widgets.css" rel="stylesheet">
+    
+    <!-- Three.js - 使用unpkg CDN（备用：本地文件） -->
+    <script src="https://unpkg.com/three@0.152.2/build/three.min.js" 
+            onerror="console.error('[Cesium JS Error] THREE.js CDN加载失败，尝试使用本地文件'); loadLocalThree();"></script>
+    
+    <!-- Cesium JS - 使用本地文件 -->
+    <script src="./lib/Cesium/Cesium.js"
+            onerror="console.error('[Cesium JS Error] Cesium.js本地文件加载失败，请检查文件路径')"></script>
+    
+    <!-- 备用：本地Three.js加载函数 -->
+    <script>
+        function loadLocalThree() {
+            // 如果CDN加载失败，尝试加载本地文件
+            if (typeof THREE === 'undefined') {
+                const script = document.createElement('script');
+                // 尝试使用本地的three.cjs（需要转换为UMD格式或使用模块加载器）
+                // 由于three.cjs是CommonJS格式，在浏览器中可能无法直接使用
+                // 这里先尝试，如果失败会继续使用CDN或显示错误
+                script.src = './lib/threejs/build/three.cjs';
+                script.onerror = function() {
+                    console.error('[Cesium JS Error] 本地THREE.js文件也无法加载，请检查网络连接或文件路径');
+                };
+                script.onload = function() {
+                    console.log('[Cesium JS Info] 已从本地文件加载THREE.js');
+                };
+                document.head.appendChild(script);
+            }
+        }
+    </script>
+    
+    <!-- Gaussian Splats 3D - 使用lib目录中的UMD库文件 -->
+    <!-- 注意：必须在THREE.js加载之后加载，因为UMD文件依赖THREE -->
+    <script>
+        // 等待THREE.js加载完成后再加载GaussianSplats3D
+        function loadGaussianSplats3D() {
+            if (typeof THREE === 'undefined') {
+                console.log('[Cesium JS Info] 等待THREE.js加载...');
+                setTimeout(loadGaussianSplats3D, 100);
+                return;
+            }
+            
+            // THREE.js已加载，现在加载GaussianSplats3D
+            const script = document.createElement('script');
+            script.src = './lib/gaussian-splats-3d/gaussian-splats-3d.umd.cjs';
+            script.onload = function() {
+                // UMD文件将库导出为全局变量 "Gaussian Splats 3D"（带空格）
+                const GaussianSplats3D = window["Gaussian Splats 3D"] || window.GaussianSplats3D;
+                
+                if (GaussianSplats3D && typeof GaussianSplats3D.Viewer !== 'undefined') {
+                    // 将其设置为全局变量，以便其他脚本可以使用（使用无空格版本）
+                    window.GaussianSplats3D = GaussianSplats3D;
+                    console.log('[Cesium JS Info] GaussianSplats3D库已加载');
+                    console.log('[Cesium JS Info] 可用的GaussianSplats3D属性:', Object.keys(GaussianSplats3D));
+                    console.log('[Cesium JS Info] GaussianSplats3D.Viewer类已正确加载');
+                } else {
+                    console.error('[Cesium JS Error] GaussianSplats3D库未加载或Viewer类未定义');
+                    console.log('[Cesium JS Info] 检查全局对象:', {
+                        'Gaussian Splats 3D': typeof window["Gaussian Splats 3D"],
+                        'GaussianSplats3D': typeof window.GaussianSplats3D,
+                        'THREE': typeof window.THREE,
+                        'window keys': Object.keys(window).filter(k => k.includes('Gaussian') || k.includes('Splat'))
+                    });
+                }
+            };
+            script.onerror = function() {
+                console.error('[Cesium JS Error] 加载GaussianSplats3D库文件失败，请检查文件路径: ./lib/gaussian-splats-3d/gaussian-splats-3d.umd.cjs');
+            };
+            document.head.appendChild(script);
+        }
+        
+        // 开始加载
+        loadGaussianSplats3D();
+    </script>
+    
+    <style>
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: sans-serif;
+        }
+        
+        #cesiumContainer {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+        
+        #threeContainer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 1;
+        }
+        
+        #threeContainer canvas {
+            pointer-events: none;
+        }
+        
+        #toolbar {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(42, 42, 42, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+            max-width: 300px;
+        }
+        
+        .toolbar-section {
+            margin-bottom: 10px;
+        }
+        
+        .toolbar-section label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: bold;
+        }
+        
+        .toolbar-section input, .toolbar-section select {
+            width: 100%;
+            padding: 5px;
+            border-radius: 3px;
+            border: 1px solid #555;
+            background: #333;
+            color: white;
+        }
+        
+        .toolbar-section button {
+            width: 100%;
+            padding: 8px;
+            margin-top: 5px;
+            border: none;
+            border-radius: 3px;
+            background: #0E639C;
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+        }
+        
+        .toolbar-section button:hover {
+            background: #1177BB;
+        }
+        
+        #info-panel {
+            position: absolute;
+            bottom: 10px;
+            left: 10px;
+            z-index: 1000;
+            background: rgba(42, 42, 42, 0.9);
+            padding: 10px;
+            border-radius: 5px;
+            color: white;
+            font-size: 12px;
+            min-width: 200px;
+        }
+        
+        .info-item {
+            margin: 3px 0;
+        }
+        
+        .collapsible {
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .collapsible:hover {
+            background: rgba(255, 255, 255, 0.1);
+        }
+        
+        .content {
+            display: block;
+        }
+        
+        .content.collapsed {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="cesiumContainer"></div>
+    <div id="threeContainer"></div>
+    
+    <div id="toolbar">
+        <div class="toolbar-section">
+            <h3 style="margin: 0 0 10px 0;">GSSE GIS视图</h3>
+        </div>
+        
+        <div class="toolbar-section">
+            <label>地形设置</label>
+            <select id="terrainSelect">
+                <option value="none">无地形</option>
+                <option value="world" selected>全球地形</option>
+            </select>
+        </div>
+        
+        <div class="toolbar-section">
+            <label>影像图层</label>
+            <select id="imagerySelect">
+                <option value="bing" selected>Bing Maps</option>
+                <option value="osm">OpenStreetMap</option>
+                <option value="arcgis">ArcGIS World Imagery</option>
+            </select>
+        </div>
+        
+        <div class="toolbar-section">
+            <label>相机位置</label>
+            <button onclick="resetCamera()">重置相机</button>
+            <button onclick="flyToModel()">飞到模型</button>
+        </div>
+    </div>
+    
+    <div id="info-panel">
+        <div class="collapsible" onclick="toggleInfoPanel()">
+            <strong>▼ 场景信息</strong>
+        </div>
+        <div id="info-content" class="content">
+            <div class="info-item">相机高度: <span id="cameraHeight">-</span>m</div>
+            <div class="info-item">经度: <span id="longitude">-</span>°</div>
+            <div class="info-item">纬度: <span id="latitude">-</span>°</div>
+            <div class="info-item">已加载模型: <span id="modelCount">0</span></div>
+        </div>
+    </div>
+
+    <!-- Qt WebChannel - 仅在Qt环境中加载 -->
+    <script>
+        // 动态加载Qt WebChannel脚本，避免在浏览器中报错
+        if (typeof qt !== 'undefined' && qt.webChannelTransport) {
+            const script = document.createElement('script');
+            script.src = 'qrc:///qtwebchannel/qwebchannel.js';
+            script.onerror = function() {
+                console.log('[Cesium JS Info] Qt WebChannel不可用（浏览器环境）');
+            };
+            document.head.appendChild(script);
+        }
+    </script>
+    <script>
+        // 全局变量
+        let cesiumViewer = null;
+        let threeScene = null;
+        let threeCamera = null;
+        let threeRenderer = null;
+        let gaussianSplatLayers = [];
+        let modelBoundingSphere = null;
+        let pyBridge = null;
+        
+        // 消息队列，用于存储初始化前收到的消息
+        const messageQueue = [];
+        let initRetryCount = 0;
+        const MAX_INIT_RETRIES = 100; // 最多重试10秒
+        
+        // 预先定义 receiveMessageFromPython 函数，避免未定义错误
+        window.receiveMessageFromPython = function(messageStr) {
+            if (!cesiumViewer) {
+                console.log('[Cesium JS Info] 收到Python消息，但viewer还未初始化，加入队列');
+                messageQueue.push(messageStr);
+                // 如果初始化重试次数过多，强制尝试初始化
+                if (initRetryCount < MAX_INIT_RETRIES) {
+                    initRetryCount++;
+                    setTimeout(function() {
+                        if (window.receiveMessageFromPython) {
+                            window.receiveMessageFromPython(messageStr);
+                        }
+                    }, 100);
+                } else {
+                    console.error('[Cesium JS Error] 初始化超时，强制处理消息');
+                    // 强制处理消息
+                    if (cesiumViewer) {
+                        const message = JSON.parse(messageStr);
+                        console.log('收到Python消息:', message);
+                    }
+                }
+                return;
+            }
+            
+            // viewer已初始化，处理消息
+            const message = JSON.parse(messageStr);
+            console.log('[Cesium JS Info] 收到Python消息:', message);
+            
+            switch(message.type) {
+                case 'load3DGS':
+                    load3DGS(message.data);
+                    break;
+                case 'loadSegment':
+                    loadSegment(message.data);
+                    break;
+                case 'clearAll':
+                    clearAllModels();
+                    break;
+                case 'setCamera':
+                    setCameraPosition(message.data);
+                    break;
+                case 'highlightSegment':
+                    highlightSegment(message.data);
+                    break;
+                case 'removeModel':
+                    removeModel(message.data);
+                    break;
+                case 'getModelInfo':
+                    getModelInfo(message.data);
+                    break;
+                default:
+                    console.log('[Cesium JS Info] 未知消息类型:', message.type);
+            }
+        };
+        
+        // 初始化标志，防止重复初始化
+        let isInitializing = false;
+        let isInitialized = false;
+        
+        // 初始化Cesium Viewer - 在Cesium库加载完成后调用
+        window.initCesiumViewer = function() {
+            // 防止重复初始化
+            if (isInitializing || isInitialized) {
+                console.log('[Cesium JS Info] 初始化已在进行或已完成，跳过');
+                return;
+            }
+            
+            // 检查DOM元素是否存在
+            const cesiumContainer = document.getElementById('cesiumContainer');
+            if (!cesiumContainer) {
+                console.error('[Cesium JS Error] 找不到cesiumContainer元素');
+                setTimeout(window.initCesiumViewer, 100);
+                return;
+            }
+            
+            // 检查Cesium是否已加载
+            if (typeof Cesium === 'undefined') {
+                console.error('[Cesium JS Error] Cesium库未加载，请检查文件路径');
+                // 延迟重试
+                setTimeout(window.initCesiumViewer, 100);
+                return;
+            }
+            
+            // 检查THREE是否已加载
+            if (typeof THREE === 'undefined') {
+                console.log('[Cesium JS Info] 等待Three.js加载...');
+                setTimeout(window.initCesiumViewer, 100);
+                return;
+            }
+            
+            isInitializing = true;
+            console.log('[Cesium JS Info] Cesium和THREE库已加载，开始初始化...');
+            
+            try {
+            
+            // 配置Cesium使用本地资源路径（避免CORS问题）
+            // 获取当前HTML文件的目录路径
+            const currentPath = window.location.href;
+            const isFileProtocol = currentPath.startsWith('file://');
+            
+            // 设置Cesium Ion访问令牌
+            Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJiOTE1YmRiZi1hM2E3LTQ5NGUtYTI4Yy0yYTI1YjRmNmZiMzMiLCJpZCI6MjgyOTIwLCJpYXQiOjE3NDE2MTA2NTB9.bNbSodak59xJkrGIOiPcaAjaRQ3H4iJExEQiHjXDdqo';
+            
+            // 在file://协议下，静默处理Ion API的CORS错误
+            // 这样即使Ion API请求失败，也不会影响Cesium的正常显示
+            if (isFileProtocol) {
+                // 拦截并静默处理Ion API的CORS错误
+                const originalError = console.error;
+                console.error = function(...args) {
+                    // 如果是Ion API的CORS错误，静默处理
+                    const message = args.join(' ');
+                    if (message.includes('api.cesium.com') && message.includes('CORS')) {
+                        // 静默处理，不输出错误
+                        return;
+                    }
+                    // 其他错误正常输出
+                    originalError.apply(console, args);
+                };
+                
+                // 捕获未处理的Promise错误（Ion API请求失败）
+                window.addEventListener('unhandledrejection', function(event) {
+                    const reason = event.reason;
+                    if (reason && typeof reason === 'object') {
+                        const reasonStr = JSON.stringify(reason);
+                        if (reasonStr.includes('api.cesium.com') || reasonStr.includes('CORS')) {
+                            // 静默处理Ion API的CORS错误
+                            event.preventDefault();
+                            return;
+                        }
+                    }
+                });
+            }
+            
+            // 配置Cesium使用本地资源路径（避免CORS问题）
+            let basePath = '';
+            if (isFileProtocol) {
+                // 从file://路径中提取目录
+                // file:///home/xyh/GSSE/cesium_viewer.html -> file:///home/xyh/GSSE/
+                const pathMatch = currentPath.match(/file:\/\/\/.*\//);
+                if (pathMatch) {
+                    basePath = pathMatch[0];
+                } else {
+                    // 如果匹配失败，尝试另一种格式 file:///path/to/file.html
+                    const lastSlash = currentPath.lastIndexOf('/');
+                    if (lastSlash > 0) {
+                        basePath = currentPath.substring(0, lastSlash + 1);
+                    }
+                }
+            } else {
+                // 对于HTTP/HTTPS，使用相对路径
+                basePath = window.location.origin + window.location.pathname.substring(0, window.location.pathname.lastIndexOf('/') + 1);
+            }
+            
+            // 设置Cesium资源路径为本地lib/Cesium目录
+            if (typeof Cesium !== 'undefined' && basePath) {
+                const cesiumBasePath = basePath + 'lib/Cesium/';
+                // 重写buildModuleUrl以使用本地路径
+                const originalBuildModuleUrl = Cesium.buildModuleUrl;
+                Cesium.buildModuleUrl = function(module) {
+                    // 检查module参数是否有效
+                    if (!module || typeof module !== 'string') {
+                        return originalBuildModuleUrl ? originalBuildModuleUrl(module) : module;
+                    }
+                    // 如果模块路径是绝对URL，直接返回
+                    if (module.startsWith('http://') || module.startsWith('https://') || module.startsWith('data:')) {
+                        return originalBuildModuleUrl ? originalBuildModuleUrl(module) : module;
+                    }
+                    // 否则使用本地路径
+                    const localPath = cesiumBasePath + module;
+                    // 只在调试时输出日志
+                    // console.log('[Cesium JS Info] 使用本地资源:', module, '->', localPath);
+                    return localPath;
+                };
+                console.log('[Cesium JS Info] Cesium资源路径设置为:', cesiumBasePath);
+            }
+            
+            // 初始化WebChannel
+            // 在Qt WebEngine中，WebChannel需要等待页面完全加载
+            function initWebChannel() {
+                if (typeof QWebChannel !== 'undefined' && typeof qt !== 'undefined' && qt.webChannelTransport) {
+                    try {
+                        new QWebChannel(qt.webChannelTransport, function(channel) {
+                            if (channel && channel.objects && channel.objects.pyBridge) {
+                                pyBridge = channel.objects.pyBridge;
+                                window.pyBridge = pyBridge;
+                                console.log('[Cesium JS Info] WebChannel已连接');
+                            } else {
+                                console.log('[Cesium JS Info] WebChannel对象未找到');
+                            }
+                        });
+                    } catch (e) {
+                        console.log('[Cesium JS Info] WebChannel初始化失败:', e);
+                    }
+                } else {
+                    // 备用方案：直接使用window.pyBridge（如果已设置）
+                    if (window.pyBridge) {
+                        pyBridge = window.pyBridge;
+                        console.log('[Cesium JS Info] 使用window.pyBridge');
+                    } else {
+                        console.log('[Cesium JS Info] WebChannel不可用，使用备用方案');
+                    }
+                }
+            }
+            
+            // 延迟初始化WebChannel，确保Qt环境已准备好
+            setTimeout(initWebChannel, 100);
+            
+            cesiumViewer = new Cesium.Viewer('cesiumContainer', {
+                scene3DOnly: true,
+                // 使用简化的地形以避免依赖外部服务
+                terrainProvider: new Cesium.EllipsoidTerrainProvider(),
+                timeline: false,
+                animation: false,
+                baseLayerPicker: true, // 允许用户切换不同地图
+                geocoder: false,
+                homeButton: true,
+                sceneModePicker: true,
+                navigationHelpButton: false,
+                fullscreenButton: true,
+                // 在file://协议下，禁用一些需要远程服务的功能
+                requestRenderMode: isFileProtocol, // file://协议下启用按需渲染
+                maximumRenderTimeChange: isFileProtocol ? Infinity : undefined // file://协议下不限制渲染时间
+            });
+            
+            // 在file://协议下，配置错误处理，使Ion API错误不影响显示
+            if (isFileProtocol) {
+                // 延迟添加事件监听器，确保globe已初始化
+                setTimeout(function() {
+                    if (cesiumViewer && cesiumViewer.scene && cesiumViewer.scene.globe && cesiumViewer.scene.globe.tileLoadErrorEvent) {
+                        // 监听Cesium的错误事件，静默处理Ion API相关错误
+                        cesiumViewer.scene.globe.tileLoadErrorEvent.addEventListener(function(error) {
+                            // 静默处理瓦片加载错误（可能是CORS导致的）
+                            console.log('[Cesium JS Info] 瓦片加载错误（已静默处理）:', error);
+                        });
+                    }
+                }, 100);
+            }
+            
+            // 使用Cesium默认底图，不做干预
+            
+            // 在file://协议下，设置地球为单色（蓝色）
+            if (isFileProtocol) {
+                // 延迟设置，确保globe已初始化
+                setTimeout(function() {
+                    if (cesiumViewer && cesiumViewer.scene && cesiumViewer.scene.globe) {
+                        try {
+                            // 设置地球为蓝色（使用baseColor）
+                            cesiumViewer.scene.globe.baseColor = Cesium.Color.BLUE.withAlpha(0.8);
+                            // 或者使用ColorMaterial（如果需要材质）
+                            // cesiumViewer.scene.globe.material = new Cesium.ColorMaterial({
+                            //     color: Cesium.Color.BLUE.withAlpha(0.8)
+                            // });
+                        } catch (e) {
+                            console.log('[Cesium JS Info] 设置地球颜色失败:', e);
+                        }
+                    }
+                }, 200);
+            }
+            
+            // 初始化Three.js场景
+            initThreeScene();
+            
+            // 设置渲染循环：在Cesium渲染后同步相机并渲染THREE.js场景
+            cesiumViewer.scene.postRender.addEventListener(function() {
+                syncCameraAndRender();
+            });
+            
+            // 添加地形和影像选择事件监听器
+            document.getElementById('terrainSelect').addEventListener('change', updateTerrain);
+            document.getElementById('imagerySelect').addEventListener('change', updateImagery);
+            
+            // 启动场景信息更新
+            startInfoUpdate();
+            
+            // 处理队列中的消息
+            while (messageQueue.length > 0) {
+                const msg = messageQueue.shift();
+                window.receiveMessageFromPython(msg);
+            }
+            
+            isInitialized = true;
+            console.log('[Cesium JS Info] 初始化完成');
+            
+            // 监听容器尺寸变化，确保Cesium在容器尺寸变为有效时正确调整
+            // 这在Qt WebEngine中很重要，因为未激活的标签页容器尺寸可能为0
+            let lastWidth = cesiumContainer.offsetWidth;
+            let lastHeight = cesiumContainer.offsetHeight;
+            
+            // 使用ResizeObserver监听容器尺寸变化（如果支持）
+            if (typeof ResizeObserver !== 'undefined') {
+                const resizeObserver = new ResizeObserver(function(entries) {
+                    for (const entry of entries) {
+                        const width = entry.contentRect.width;
+                        const height = entry.contentRect.height;
+                        if (width > 0 && height > 0 && (width !== lastWidth || height !== lastHeight)) {
+                            lastWidth = width;
+                            lastHeight = height;
+                            console.log('[Cesium JS Info] 容器尺寸变化，调整Cesium Viewer:', width, 'x', height);
+                            if (cesiumViewer) {
+                                cesiumViewer.resize();
+                            }
+                            if (threeRenderer) {
+                                threeRenderer.setSize(width, height);
+                                threeCamera.aspect = width / height;
+                                threeCamera.updateProjectionMatrix();
+                            }
+                        }
+                    }
+                });
+                resizeObserver.observe(cesiumContainer);
+            } else {
+                // 备用方案：定期检查容器尺寸
+                const checkSizeInterval = setInterval(function() {
+                    const width = cesiumContainer.offsetWidth;
+                    const height = cesiumContainer.offsetHeight;
+                    if (width > 0 && height > 0 && (width !== lastWidth || height !== lastHeight)) {
+                        lastWidth = width;
+                        lastHeight = height;
+                        console.log('[Cesium JS Info] 容器尺寸变化，调整Cesium Viewer:', width, 'x', height);
+                        if (cesiumViewer) {
+                            cesiumViewer.resize();
+                        }
+                        if (threeRenderer) {
+                            threeRenderer.setSize(width, height);
+                            threeCamera.aspect = width / height;
+                            threeCamera.updateProjectionMatrix();
+                        }
+                    }
+                }, 500); // 每500ms检查一次
+                
+                // 在窗口大小变化时也检查
+                window.addEventListener('resize', function() {
+                    const width = cesiumContainer.offsetWidth;
+                    const height = cesiumContainer.offsetHeight;
+                    if (width > 0 && height > 0) {
+                        if (cesiumViewer) {
+                            cesiumViewer.resize();
+                        }
+                        if (threeRenderer) {
+                            threeRenderer.setSize(width, height);
+                            threeCamera.aspect = width / height;
+                            threeCamera.updateProjectionMatrix();
+                        }
+                    }
+                });
+            }
+            
+            // 通知Python初始化完成
+            function notifyPython() {
+                if (pyBridge && pyBridge.receiveMessage) {
+                    try {
+                        pyBridge.receiveMessage(JSON.stringify({
+                            type: 'viewerReady',
+                            message: 'Cesium viewer已初始化'
+                        }));
+                    } catch (e) {
+                        console.log('[Cesium JS Info] 通知Python失败:', e);
+                    }
+                } else if (window.pyBridge && window.pyBridge.receiveMessage) {
+                    try {
+                        window.pyBridge.receiveMessage(JSON.stringify({
+                            type: 'viewerReady',
+                            message: 'Cesium viewer已初始化'
+                        }));
+                    } catch (e) {
+                        console.log('[Cesium JS Info] 通知Python失败:', e);
+                    }
+                }
+            }
+            
+            // 延迟通知，确保WebChannel已连接
+            setTimeout(notifyPython, 500);
+            
+            } catch (error) {
+                console.error('[Cesium JS Error] 初始化失败:', error);
+                isInitializing = false;
+            }
+        };
+        
+        function initThreeScene() {
+            // 创建Three.js场景
+            threeScene = new THREE.Scene();
+            
+            // 创建相机（将使用Cesium相机）
+            threeCamera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000000);
+            threeScene.add(threeCamera);
+            
+            // 创建渲染器
+            threeRenderer = new THREE.WebGLRenderer({
+                alpha: true
+            });
+            threeRenderer.setPixelRatio(window.devicePixelRatio);
+            threeRenderer.setSize(window.innerWidth, window.innerHeight);
+            threeRenderer.autoClear = false;
+            
+            const threeContainer = document.getElementById('threeContainer');
+            threeContainer.appendChild(threeRenderer.domElement);
+            
+            // 监听窗口大小变化
+            window.addEventListener('resize', function() {
+                const width = window.innerWidth;
+                const height = window.innerHeight;
+                threeRenderer.setSize(width, height);
+                threeCamera.aspect = width / height;
+                threeCamera.updateProjectionMatrix();
+            });
+        }
+        
+        // 同步Cesium相机到THREE.js相机并渲染（参考cesium-gaussian-splatting项目）
+        function syncCameraAndRender() {
+            if (!cesiumViewer || !threeCamera || !threeRenderer) return;
+            
+            // 同步相机FOV
+            threeCamera.fov = Cesium.Math.toDegrees(cesiumViewer.camera.frustum.fovy);
+            threeCamera.updateProjectionMatrix();
+            
+            // 从Cesium相机获取视图矩阵
+            const cesiumCamera = cesiumViewer.camera;
+            const cvm = cesiumCamera.viewMatrix;
+            const civm = cesiumCamera.inverseViewMatrix;
+            
+            // 提取相机位置
+            const cameraPosition = Cesium.Cartesian3.fromElements(
+                civm[12],
+                civm[13],
+                civm[14]
+            );
+            
+            // 提取相机方向
+            const cameraDirection = new Cesium.Cartesian3(-cvm[2], -cvm[6], -cvm[10]);
+            const cameraUp = new Cesium.Cartesian3(cvm[1], cvm[5], cvm[9]);
+            
+            // 转换为THREE.js向量
+            const cameraPositionVec3 = new THREE.Vector3(
+                cameraPosition.x,
+                cameraPosition.y,
+                cameraPosition.z
+            );
+            const cameraDirectionVec3 = new THREE.Vector3(
+                cameraDirection.x,
+                cameraDirection.y,
+                cameraDirection.z
+            );
+            const cameraUpVec3 = new THREE.Vector3(cameraUp.x, cameraUp.y, cameraUp.z);
+            
+            // 更新THREE.js相机
+            threeCamera.position.copy(cameraPositionVec3);
+            threeCamera.up.copy(cameraUpVec3);
+            threeCamera.lookAt(cameraPositionVec3.clone().add(cameraDirectionVec3));
+            
+            // 更新并渲染所有高斯模型（严格按照cesium-gaussian-splatting项目）
+            // 根据cesium-gaussian-splatting的实现：
+            // 1. 先调用splatViewer.update()更新状态
+            // 2. 然后调用splatViewer.render()渲染splatMesh
+            // 3. 最后调用threeRenderer.render()渲染scene中的其他对象
+            let needBoundsUpdate = false;
+            gaussianSplatLayers.forEach(function(layer) {
+                if (!layer.ready) return;
+                
+                // 确保scene和mesh的世界变换矩阵已更新
+                // 这是关键：因为mesh在scene中，而scene的位置是Cesium坐标（非常大的数字）
+                // 需要确保世界变换矩阵正确计算
+                if (layer.scene) {
+                    layer.scene.updateMatrixWorld(true);
+                    
+                    // 调试：检查mesh的世界位置（仅在第一次渲染时输出）
+                    if (layer._firstRender === undefined) {
+                        layer._firstRender = true;
+                        const mesh = layer.splatViewer ? layer.splatViewer.getSplatMesh() : null;
+                        if (mesh) {
+                            const worldPos = new THREE.Vector3();
+                            mesh.getWorldPosition(worldPos);
+                            console.log('[Cesium JS Info] 首次渲染 - Mesh世界位置:', worldPos.x, worldPos.y, worldPos.z);
+                            console.log('[Cesium JS Info] 首次渲染 - Scene位置:', layer.scene.position.x, layer.scene.position.y, layer.scene.position.z);
+                            console.log('[Cesium JS Info] 首次渲染 - 相机位置:', threeCamera.position.x, threeCamera.position.y, threeCamera.position.z);
+                        }
+                    }
+                }
+                
+                if (layer._needsBoundsUpdate) {
+                    needBoundsUpdate = true;
+                }
+                
+                // 调用splatViewer的update和render方法（严格按照cesium-gaussian-splatting项目）
+                try {
+                    if (layer.splatViewer && typeof layer.splatViewer.update === 'function') {
+                        layer.splatViewer.update();
+                    }
+                    if (layer.splatViewer && typeof layer.splatViewer.render === 'function') {
+                        // splatViewer.render() 会自己调用 renderer.render() 来渲染 splatMesh
+                        // 它使用splatViewer内部的renderer和camera（我们在创建时传入的）
+                        // 关键：splatMesh的世界变换矩阵会在splatViewer.update()中更新
+                        layer.splatViewer.render();
+                    }
+
+                    if (layer._debugLogged !== true) {
+                        const mesh = layer.splatViewer ? layer.splatViewer.getSplatMesh() : null;
+                        const instanceCount = mesh && mesh.geometry ? mesh.geometry.instanceCount : null;
+                        const renderCount = (mesh && mesh.geometry && mesh.geometry.drawRange) ? mesh.geometry.drawRange.count : null;
+                        console.log('[Cesium JS Info] 首次渲染 - geometry.instanceCount:', instanceCount);
+                        console.log('[Cesium JS Info] 首次渲染 - geometry.drawRange.count:', renderCount);
+                        if (mesh && mesh.getSplatCount) {
+                            console.log('[Cesium JS Info] 首次渲染 - 总splats:', mesh.getSplatCount());
+                        }
+                        layer._debugLogged = true;
+                    }
+                } catch (e) {
+                    console.warn('[Cesium JS Warning] 更新/渲染模型时出错:', e);
+                    console.error('[Cesium JS Error] 错误详情:', e);
+                }
+            });
+            
+            if (needBoundsUpdate) {
+                calculateBoundingSphere();
+            }
+            
+            // 根据cesium-gaussian-splatting项目，在splatViewer.render()之后，
+            // 还需要调用threeRenderer.render()来渲染scene中的其他对象
+            // 虽然splatViewer.render()已经渲染了splatMesh，但threeRenderer.render()不会重复渲染
+            // 因为splatMesh已经在splatViewer.render()中渲染过了
+            threeRenderer.render(threeScene, threeCamera);
+        }
+        
+        function updateTerrain() {
+            const select = document.getElementById('terrainSelect');
+            const value = select.options[select.selectedIndex].value;
+            
+            if (value === 'world') {
+                cesiumViewer.terrainProvider = Cesium.createWorldTerrain();
+            } else {
+                cesiumViewer.terrainProvider = new Cesium.EllipsoidTerrainProvider();
+            }
+        }
+        
+        function updateImagery(fallbackAttempted = false) {
+            const select = document.getElementById('imagerySelect');
+            const value = select.options[select.selectedIndex].value;
+            let provider = null;
+            
+            try {
+                switch (value) {
+                    case 'bing':
+                        provider = new Cesium.BingMapsImageryProvider({
+                            url: 'https://dev.virtualearth.net',
+                            key: 'AuhfJZVHlwH7UQ8cW8lqFuF7q7nCxTfa5bkCbEMjXjzQ57b9sV_8s8pE7zR7Z-iN',
+                            mapStyle: Cesium.BingMapsStyle.AERIAL
+                        });
+                        break;
+                    case 'osm':
+                        provider = new Cesium.OpenStreetMapImageryProvider({
+                            url: 'https://a.tile.openstreetmap.org/'
+                        });
+                        break;
+                    case 'arcgis':
+                        provider = new Cesium.ArcGisMapServerImageryProvider({
+                            url: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer'
+                        });
+                        break;
+                }
+            } catch (error) {
+                console.error(`[Cesium JS Error] 创建影像图层失败(${value}):`, error);
+                if (!fallbackAttempted && value !== 'osm') {
+                    console.log('[Cesium JS Info] 回退到OpenStreetMap影像');
+                    select.value = 'osm';
+                    updateImagery(true);
+                }
+                return;
+            }
+
+            if (!provider) {
+                console.warn('[Cesium JS Warning] 未创建新的影像图层提供者');
+                return;
+            }
+            
+            let oldLayer = null;
+            if (cesiumViewer.imageryLayers.length > 0) {
+                oldLayer = cesiumViewer.imageryLayers.get(0);
+            }
+
+            let newLayer = null;
+            try {
+                newLayer = cesiumViewer.imageryLayers.addImageryProvider(provider);
+            } catch (error) {
+                console.error(`[Cesium JS Error] 添加影像图层失败(${value}):`, error);
+                if (!fallbackAttempted && value !== 'osm') {
+                    console.log('[Cesium JS Info] 回退到OpenStreetMap影像');
+                    select.value = 'osm';
+                    updateImagery(true);
+                }
+                return;
+            }
+
+            if (oldLayer) {
+                cesiumViewer.imageryLayers.remove(oldLayer);
+            }
+
+            if (provider.readyPromise && typeof provider.readyPromise.then === 'function') {
+                provider.readyPromise.then(function() {
+                    console.log(`[Cesium JS Info] 影像图层已准备就绪: ${value}`);
+                }).catch(function(error) {
+                    console.error(`[Cesium JS Error] 影像图层加载失败(${value}):`, error);
+                    if (!fallbackAttempted && value !== 'osm') {
+                        console.log('[Cesium JS Info] 回退到OpenStreetMap影像');
+                        select.value = 'osm';
+                        updateImagery(true);
+                    }
+                });
+            }
+
+            if (provider.errorEvent && typeof provider.errorEvent.addEventListener === 'function') {
+                provider.errorEvent.addEventListener(function(error) {
+                    console.error(`[Cesium JS Error] 影像图层请求错误(${value}):`, error);
+                });
+            }
+
+            if (newLayer && typeof newLayer.show === 'boolean') {
+                newLayer.show = true;
+            }
+        }
+        
+        async function loadModel(data) {
+            try {
+                let resourceUrl = data.url || '';
+                const lon = data.location.lon;
+                const lat = data.location.lat;
+                const height = data.location.height || 0;
+                const scale = data.scale || 1.0;
+                const rotation = data.rotation || {x: 0, y: 0, z: 0};
+                const modelId = data.modelId || `model_${Date.now()}`;
+                const isSegment = data.isSegment || false;
+                const segmentId = data.segmentId || null;
+
+                let arrayBuffer = null;
+                // 对 data URL 不再做转换，直接交给 addSplatScene 处理，避免内存问题
+                // 对 http/https 同理
+
+                const position = Cesium.Cartesian3.fromDegrees(lon, lat, height);
+
+                    const splatConfig = {
+                    selfDrivenMode: false,
+                        gpuAcceleratedSort: false,
+                    sharedMemoryForWorkers: false,
+                    ignoreDevicePixelRatio: true,
+                    sceneRevealMode: window.GaussianSplats3D.SceneRevealMode.Always,
+                    useBuiltInControls: false,
+                    enableSIMDInSort: false,
+                    camera: threeCamera,
+                    renderer: threeRenderer
+                };
+
+                const splatViewer = new window.GaussianSplats3D.Viewer(splatConfig);
+
+                const scene = new THREE.Scene();
+                scene.position.set(position.x, position.y, position.z);
+                scene.rotation.set(rotation.x, rotation.y, rotation.z);
+
+                const layer = {
+                    scene,
+                    splatViewer,
+                    ready: false,
+                    modelId,
+                    isSegment,
+                    segmentId,
+                    geoLocation: { lon, lat, height },
+                    scale,
+                    rotation,
+                    blobUrl: resourceUrl.startsWith('blob:') ? resourceUrl : null,
+                    _needsBoundsUpdate: true,
+                    _pendingFlyTo: data.flyTo !== false
+                };
+
+                {
+                    const isDataUrl = resourceUrl.startsWith('data:');
+                    const splatOptions = {
+                        showLoadingUI: false,
+                        progressiveLoad: false, // 统一关闭，规避部分环境/服务器的渐进式加载问题
+                        rotation: [0, 0, 0],
+                        scale: [1, 1, 1]
+                    };
+                    if (isDataUrl) {
+                        splatOptions.format = window.GaussianSplats3D.SceneFormat.Splat;
+                    }
+                    await splatViewer.addSplatScene(resourceUrl, splatOptions);
+                }
+
+                const mesh = splatViewer.getSplatMesh();
+                if (!mesh) {
+                    throw new Error('未能获取到SplatMesh');
+                }
+                console.log('[Cesium JS Info] 3DGS模型加载成功:', modelId);
+
+                mesh.scale.set(scale, scale, scale);
+                layer.scene.add(mesh);
+                layer.scene.updateMatrixWorld(true);
+
+                threeScene.add(layer.scene);
+
+                layer.ready = true;
+                gaussianSplatLayers.push(layer);
+                calculateBoundingSphere();
+                document.getElementById('modelCount').textContent = gaussianSplatLayers.length;
+
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'loadComplete',
+                        success: true,
+                        modelId,
+                        isSegment,
+                        segmentId
+                    }));
+                }
+            } catch (error) {
+                console.error('[Cesium JS Error] 加载3DGS模型时出错:', error);
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'loadComplete',
+                        success: false,
+                        error: error.message || String(error),
+                        modelId: data.modelId || 'unknown'
+                    }));
+                }
+            }
+        }
+        
+        // 对齐项目结构：提供与 cesium-gaussian-splatting 相同的入口
+        function load3DGS(data) {
+            return loadModel(data);
+        }
+        // 暴露为全局，供 Qt/Python 调用
+        window.load3DGS = load3DGS;
+        
+        function calculateBoundingSphere() {
+            if (gaussianSplatLayers.length === 0) {
+                modelBoundingSphere = null;
+                return;
+            }
+            
+            // 计算所有模型的联合边界球
+            // 使用geoLocation和mesh的boundingBox来计算
+            let minX = Infinity, minY = Infinity, minZ = Infinity;
+            let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity;
+            let hasValidBounds = false;
+            
+            for (const layer of gaussianSplatLayers) {
+                try {
+                    if (!layer.ready || !layer.scene) continue;
+
+                    const mesh = layer.splatViewer ? layer.splatViewer.getSplatMesh() : null;
+                    let boundsUpdated = false;
+
+                    if (mesh && mesh.boundingBox) {
+                        const bbox = mesh.boundingBox;
+                        const isEmpty = typeof bbox.isEmpty === 'function' ? bbox.isEmpty() : false;
+                        if (!isEmpty) {
+                            const corners = [
+                                new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.min.z),
+                                new THREE.Vector3(bbox.min.x, bbox.min.y, bbox.max.z),
+                                new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.min.z),
+                                new THREE.Vector3(bbox.min.x, bbox.max.y, bbox.max.z),
+                                new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.min.z),
+                                new THREE.Vector3(bbox.max.x, bbox.min.y, bbox.max.z),
+                                new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.min.z),
+                                new THREE.Vector3(bbox.max.x, bbox.max.y, bbox.max.z)
+                            ];
+
+                            corners.forEach((corner) => {
+                                mesh.localToWorld(corner);
+                                minX = Math.min(minX, corner.x);
+                                minY = Math.min(minY, corner.y);
+                                minZ = Math.min(minZ, corner.z);
+                                maxX = Math.max(maxX, corner.x);
+                                maxY = Math.max(maxY, corner.y);
+                                maxZ = Math.max(maxZ, corner.z);
+                            });
+
+                            hasValidBounds = true;
+                            boundsUpdated = true;
+                        }
+                    }
+
+                    if (!boundsUpdated && mesh && mesh.geometry) {
+                        mesh.geometry.computeBoundingBox();
+                        const box = mesh.geometry.boundingBox;
+
+                        if (box) {
+                            const corners = [
+                                new THREE.Vector3(box.min.x, box.min.y, box.min.z),
+                                new THREE.Vector3(box.min.x, box.min.y, box.max.z),
+                                new THREE.Vector3(box.min.x, box.max.y, box.min.z),
+                                new THREE.Vector3(box.min.x, box.max.y, box.max.z),
+                                new THREE.Vector3(box.max.x, box.min.y, box.min.z),
+                                new THREE.Vector3(box.max.x, box.min.y, box.max.z),
+                                new THREE.Vector3(box.max.x, box.max.y, box.min.z),
+                                new THREE.Vector3(box.max.x, box.max.y, box.max.z)
+                            ];
+
+                            corners.forEach((corner) => {
+                                mesh.localToWorld(corner);
+                                minX = Math.min(minX, corner.x);
+                                minY = Math.min(minY, corner.y);
+                                minZ = Math.min(minZ, corner.z);
+                                maxX = Math.max(maxX, corner.x);
+                                maxY = Math.max(maxY, corner.y);
+                                maxZ = Math.max(maxZ, corner.z);
+                            });
+
+                            hasValidBounds = true;
+                            boundsUpdated = true;
+                        }
+                    }
+
+                    // 如果没有mesh或无法计算，回退到geoLocation
+                    if (!boundsUpdated && layer.geoLocation) {
+                        const pos = Cesium.Cartesian3.fromDegrees(
+                            layer.geoLocation.lon,
+                            layer.geoLocation.lat,
+                            layer.geoLocation.height
+                        );
+                        const radius = 100;
+
+                        minX = Math.min(minX, pos.x - radius);
+                        minY = Math.min(minY, pos.y - radius);
+                        minZ = Math.min(minZ, pos.z - radius);
+                        maxX = Math.max(maxX, pos.x + radius);
+                        maxY = Math.max(maxY, pos.y + radius);
+                        maxZ = Math.max(maxZ, pos.z + radius);
+
+                        hasValidBounds = true;
+                    }
+
+                    // 如果boundingBox不可用，但有场景中心和最大距离，使用它来估算
+                    if (!boundsUpdated && mesh && mesh.calculatedSceneCenter && mesh.maxSplatDistanceFromSceneCenter) {
+                        console.log('[Cesium JS Info] 使用maxSplatDistance计算边界:', mesh.maxSplatDistanceFromSceneCenter);
+                        const centerLocal = mesh.calculatedSceneCenter.clone();
+                        const worldCenter = centerLocal.clone();
+                        layer.scene.localToWorld(worldCenter);
+                        const radius = mesh.maxSplatDistanceFromSceneCenter * (layer.scale || 1);
+
+                        minX = Math.min(minX, worldCenter.x - radius);
+                        minY = Math.min(minY, worldCenter.y - radius);
+                        minZ = Math.min(minZ, worldCenter.z - radius);
+                        maxX = Math.max(maxX, worldCenter.x + radius);
+                        maxY = Math.max(maxY, worldCenter.y + radius);
+                        maxZ = Math.max(maxZ, worldCenter.z + radius);
+
+                        hasValidBounds = true;
+                        boundsUpdated = true;
+                    }
+
+                    if (boundsUpdated) {
+                        layer._needsBoundsUpdate = false;
+                    }
+
+                } catch (e) {
+                    console.warn('[Cesium JS Warning] 计算边界球时出错:', e);
+                }
+            }
+            
+            if (hasValidBounds) {
+                const centerX = (minX + maxX) / 2;
+                const centerY = (minY + maxY) / 2;
+                const centerZ = (minZ + maxZ) / 2;
+                const radius = Math.sqrt(
+                    Math.pow(maxX - minX, 2) + 
+                    Math.pow(maxY - minY, 2) + 
+                    Math.pow(maxZ - minZ, 2)
+                ) / 2;
+                
+                modelBoundingSphere = {
+                    center: [centerX, centerY, centerZ],
+                    radius: radius
+                };
+            } else {
+                // 回退：使用第一个模型的位置
+                const firstLayer = gaussianSplatLayers[0];
+                if (firstLayer && firstLayer.geoLocation) {
+                    const pos = Cesium.Cartesian3.fromDegrees(
+                        firstLayer.geoLocation.lon,
+                        firstLayer.geoLocation.lat,
+                        firstLayer.geoLocation.height
+                    );
+                    modelBoundingSphere = {
+                        center: [pos.x, pos.y, pos.z],
+                        radius: 100
+                    };
+                }
+            }
+
+            if (modelBoundingSphere) {
+                const pendingFlyLayers = gaussianSplatLayers.filter(layer => layer._pendingFlyTo);
+                if (pendingFlyLayers.length > 0) {
+                    pendingFlyLayers.forEach(layer => layer._pendingFlyTo = false);
+                    console.log('[Cesium JS Info] 边界球已计算，执行飞行');
+                    flyToModel();
+                }
+            }
+        }
+        
+        function loadSegment(data) {
+            console.log('[Cesium JS Info] 加载分割模型:', data);
+            
+            // 使用load3DGS函数，但标记为分割模型
+            const segmentData = {
+                ...data,
+                isSegment: true,
+                modelId: data.segmentId || `segment_${Date.now()}`
+            };
+            
+            load3DGS(segmentData);
+        }
+        
+        function highlightSegment(data) {
+            const segmentId = data.segmentId;
+            console.log('[Cesium JS Info] 高亮分割:', segmentId);
+            
+            // 查找对应的分割模型
+            const segment = gaussianSplatLayers.find(splat => 
+                splat.isSegment && splat.segmentId === segmentId
+            );
+            
+            if (segment) {
+                // 临时高亮效果：调整透明度或颜色
+                // 这里可以实现更复杂的高亮效果
+                console.log('[Cesium JS Info] 找到分割模型，应用高亮效果');
+                
+                // 通知Python高亮完成
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'highlightComplete',
+                        success: true,
+                        segmentId: segmentId
+                    }));
+                }
+            } else {
+                console.warn('[Cesium JS Warning] 未找到分割模型:', segmentId);
+                
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'highlightComplete',
+                        success: false,
+                        error: '未找到分割模型',
+                        segmentId: segmentId
+                    }));
+                }
+            }
+        }
+        
+        function removeModel(data) {
+            const modelId = data.modelId;
+            console.log('[Cesium JS Info] 移除模型:', modelId);
+            
+            const index = gaussianSplatLayers.findIndex(layer => layer.modelId === modelId);
+            
+            if (index !== -1) {
+                const layer = gaussianSplatLayers[index];
+                
+                // 清理Blob URL（如果存在）
+                if (layer.blobUrl) {
+                    try {
+                        URL.revokeObjectURL(layer.blobUrl);
+                        console.log('[Cesium JS Info] 已清理Blob URL');
+                    } catch (e) {
+                        console.warn('[Cesium JS Warning] 清理Blob URL失败:', e);
+                    }
+                }
+                
+                // 清理资源（参考cesium-gaussian-splatting项目）
+                if (layer.splatViewer && layer.splatViewer.dispose) {
+                    layer.splatViewer.dispose().catch(err => {
+                        console.warn('[Cesium JS Warning] 清理模型资源时出错:', err);
+                    });
+                }
+                
+                // 从场景中移除（参考cesium-gaussian-splatting项目）
+                if (layer.scene) {
+                    threeScene.remove(layer.scene);
+                }
+                
+                gaussianSplatLayers.splice(index, 1);
+                
+                // 重新计算边界球
+                calculateBoundingSphere();
+                
+                // 更新模型计数
+                document.getElementById('modelCount').textContent = gaussianSplatLayers.length;
+                
+                console.log('[Cesium JS Info] 模型移除成功:', modelId);
+                
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'removeComplete',
+                        success: true,
+                        modelId: modelId
+                    }));
+                }
+            } else {
+                console.warn('[Cesium JS Warning] 未找到模型:', modelId);
+                
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'removeComplete',
+                        success: false,
+                        error: '未找到模型',
+                        modelId: modelId
+                    }));
+                }
+            }
+        }
+        
+        function clearAllModels() {
+            console.log('[Cesium JS Info] 清除所有模型');
+            
+            // 移除所有高斯模型（参考cesium-gaussian-splatting项目）
+            for (const layer of gaussianSplatLayers) {
+                // 清理Blob URL（如果存在）
+                if (layer.blobUrl) {
+                    try {
+                        URL.revokeObjectURL(layer.blobUrl);
+                    } catch (e) {
+                        console.warn('[Cesium JS Warning] 清理Blob URL失败:', e);
+                    }
+                }
+                
+                // 清理资源
+                if (layer.splatViewer && layer.splatViewer.dispose) {
+                    layer.splatViewer.dispose().catch(err => {
+                        console.warn('[Cesium JS Warning] 清理模型资源时出错:', err);
+                    });
+                }
+                
+                // 从场景中移除
+                if (layer.scene) {
+                    threeScene.remove(layer.scene);
+                }
+            }
+            gaussianSplatLayers = [];
+            
+            // 重置边界球
+            modelBoundingSphere = null;
+            
+            // 更新模型计数
+            document.getElementById('modelCount').textContent = '0';
+        }
+        
+        function setCameraPosition(data) {
+            if (!cesiumViewer) return;
+            
+            const position = Cesium.Cartesian3.fromDegrees(
+                data.longitude, 
+                data.latitude, 
+                data.height
+            );
+            
+            cesiumViewer.camera.setView({
+                destination: position,
+                orientation: {
+                    heading: data.heading || 0,
+                    pitch: data.pitch || -Cesium.Math.PI_OVER_FOUR,
+                    roll: data.roll || 0
+                }
+            });
+        }
+        
+        function resetCamera() {
+            if (!cesiumViewer) return;
+            
+            cesiumViewer.camera.setView({
+                destination: Cesium.Cartesian3.fromDegrees(116.391, 39.907, 1500),
+                orientation: {
+                    heading: 0,
+                    pitch: -Cesium.Math.PI_OVER_FOUR,
+                    roll: 0
+                }
+            });
+        }
+        
+        function flyToModel() {
+            if (!cesiumViewer) {
+                console.log('[Cesium JS Info] Cesium viewer未初始化');
+                return;
+            }
+            
+            // 如果有边界球，使用边界球
+            if (modelBoundingSphere && modelBoundingSphere.center) {
+                console.log('[Cesium JS Info] 使用边界球飞到模型:', modelBoundingSphere);
+                const boundingSphere = new Cesium.BoundingSphere(
+                    Cesium.Cartesian3.fromElements(
+                        modelBoundingSphere.center[0],
+                        modelBoundingSphere.center[1],
+                        modelBoundingSphere.center[2]
+                    ),
+                    modelBoundingSphere.radius
+                );
+                
+                cesiumViewer.camera.flyToBoundingSphere(boundingSphere, {
+                    duration: 2,
+                    offset: new Cesium.HeadingPitchRange(0, -0.5, modelBoundingSphere.radius * 1.5)
+                });
+            } else if (gaussianSplatLayers.length > 0) {
+                // 如果没有边界球，使用第一个模型的位置
+                const firstLayer = gaussianSplatLayers[0];
+                if (firstLayer && firstLayer.geoLocation) {
+                    console.log('[Cesium JS Info] 使用模型地理位置飞到模型:', firstLayer.geoLocation);
+                    const position = Cesium.Cartesian3.fromDegrees(
+                        firstLayer.geoLocation.lon,
+                        firstLayer.geoLocation.lat,
+                        firstLayer.geoLocation.height + 100  // 在模型上方100米
+                    );
+                    
+                    cesiumViewer.camera.flyTo({
+                        destination: position,
+                        orientation: {
+                            heading: 0,
+                            pitch: -Cesium.Math.PI_OVER_FOUR,
+                            roll: 0
+                        },
+                        duration: 2
+                    });
+                }
+            } else {
+                console.log('[Cesium JS Info] 没有模型可飞行');
+            }
+        }
+        
+        function toggleInfoPanel() {
+            const content = document.getElementById('info-content');
+            content.classList.toggle('collapsed');
+        }
+        
+        function startInfoUpdate() {
+            setInterval(updateInfo, 1000);
+        }
+        
+        function updateInfo() {
+            if (!cesiumViewer) return;
+            
+            // 获取相机位置
+            const cameraPosition = cesiumViewer.camera.position;
+            const cartographic = Cesium.Cartographic.fromCartesian(cameraPosition);
+            const longitude = Cesium.Math.toDegrees(cartographic.longitude);
+            const latitude = Cesium.Math.toDegrees(cartographic.latitude);
+            const height = cartographic.height;
+            
+            // 更新UI
+            document.getElementById('cameraHeight').textContent = height.toFixed(1);
+            document.getElementById('longitude').textContent = longitude.toFixed(6);
+            document.getElementById('latitude').textContent = latitude.toFixed(6);
+        }
+        
+        // 页面加载完成后初始化
+        window.onload = function() {
+            console.log('[Cesium JS Info] 页面加载完成，开始初始化...');
+            
+            // 检查库是否已加载和DOM是否准备好
+            let checkCount = 0;
+            const MAX_CHECK_COUNT = 100; // 最多检查10秒
+            
+            function checkLibraries() {
+                checkCount++;
+                
+                // 检查DOM元素
+                const cesiumContainer = document.getElementById('cesiumContainer');
+                if (!cesiumContainer) {
+                    console.log('[Cesium JS Info] 等待DOM元素...');
+                    if (checkCount < MAX_CHECK_COUNT) {
+                        setTimeout(checkLibraries, 100);
+                    } else {
+                        console.error('[Cesium JS Error] 超时：无法找到cesiumContainer元素');
+                    }
+                    return;
+                }
+                
+                // 详细检查库加载状态
+                const cesiumLoaded = typeof Cesium !== 'undefined';
+                const threeLoaded = typeof THREE !== 'undefined';
+                
+                if (!cesiumLoaded || !threeLoaded) {
+                    // 只在第一次或每10次检查时输出详细信息
+                    if (checkCount === 1 || checkCount % 10 === 0) {
+                        const status = {
+                            Cesium: cesiumLoaded ? '已加载' : '未加载',
+                            THREE: threeLoaded ? '已加载' : '未加载',
+                            检查次数: checkCount
+                        };
+                        console.log('[Cesium JS Info] 等待库加载... Cesium:', status.Cesium, 'THREE:', status.THREE, '检查次数:', status.检查次数);
+                    }
+                    
+                    if (checkCount < MAX_CHECK_COUNT) {
+                        setTimeout(checkLibraries, 100);
+                    } else {
+                        console.error('[Cesium JS Error] 超时：库加载失败 - Cesium:', cesiumLoaded ? '已加载' : '未加载', 
+                                    'THREE:', threeLoaded ? '已加载' : '未加载', 
+                                    '建议: 请检查网络连接或文件路径');
+                    }
+                    return;
+                }
+                
+                // 库已加载，直接初始化（不等待容器尺寸）
+                // 在Qt WebEngine中，未激活的标签页容器尺寸可能为0，但Cesium可以初始化
+                // 当标签页被激活时，容器会有尺寸，Cesium会自动调整
+                console.log('[Cesium JS Info] 所有库已加载，开始初始化Cesium Viewer...', 
+                           '容器尺寸:', cesiumContainer.offsetWidth, 'x', cesiumContainer.offsetHeight);
+                window.initCesiumViewer();
+            }
+            
+            // 启动初始化过程
+            setTimeout(checkLibraries, 100);
+        };
+        
+        // 如果DOM已经准备好（在GUI中可能已经加载）
+        if (document.readyState === 'complete' || document.readyState === 'interactive') {
+            setTimeout(function() {
+                if (!isInitialized && !isInitializing) {
+                    console.log('[Cesium JS Info] DOM已准备好，开始初始化...');
+                    window.onload();
+                }
+            }, 100);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,18 @@
+# Git LFS配置（如果需要上传大文件）
+*.pth filter=lfs diff=lfs merge=lfs -text
+*.pt filter=lfs diff=lfs merge=lfs -text
+*.bin filter=lfs diff=lfs merge=lfs -text
+
+# 文本文件使用LF换行符
+*.py text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.txt text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.json text eol=lf
+
+# 图片文件
+*.jpg binary
+*.png binary
+*.gif binary

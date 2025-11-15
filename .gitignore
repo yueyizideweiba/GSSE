@@ -1,0 +1,84 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+*.egg
+
+# 虚拟环境
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# 数据文件（大型文件，不上传）
+input/
+output/
+dataset/
+*.ply
+
+# 模型权重（超大文件，不上传）
+*.pth
+*.pt
+
+# 依赖文件夹（用户需要自己下载安装，详见 README.md）
+dependencies/
+colmap/
+gaussiansplatting/
+
+# 其他二进制文件
+*.bin
+*.npy
+
+# 临时文件
+*.log
+*.tmp
+*.cache
+
+# Vocabulary tree（超大文件）
+vocabulary_tree/*.bin
+
+# 测试和临时数据
+test/
+temp/
+
+# Node.js 依赖
+node_modules/
+# package-lock.json 应该被包含在版本控制中
+
+# Gaussian Splatting 输出文件
+*.splat
+*.splats
+
+# 大型库文件（已包含在依赖中，不需要上传）
+lib/Cesium/
+lib/threejs/
+lib/gaussian-splats-3d/
+
+# COLMAP 输入数据
+colmap/input/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+*.bak
+*~
+
+# Jupyter Notebook 检查点
+.ipynb_checkpoints/
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# Git 备份文件夹
+.git.backup.*
