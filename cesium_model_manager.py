@@ -15,6 +15,7 @@ from cesium_widget import CesiumWidget
 from gis_converter import GaussianSplattingToGIS, CoordinateTransformer
 from ply_to_splat_converter import convert_gaussians_to_splat
 from exif_geo_extractor import get_model_center_from_images
+from temp_http_server import get_global_server
 
 
 class CesiumModelManager:
@@ -33,9 +34,13 @@ class CesiumModelManager:
         # 模型管理
         self.loaded_models = {}  # model_id -> model_info
         self.temp_dirs = []  # 临时目录列表
+        self.http_files = []  # HTTP服务器上的文件列表
         
         # 自动定位配置
         self.auto_geo_location = True  # 是否启用自动地理定位
+        
+        # 获取HTTP服务器实例
+        self.http_server = get_global_server()
         
     def load_full_model_to_cesium(self, gaussians, longitude: float, latitude: float, 
                                  altitude: float = 0.0, model_id: str = None,
@@ -66,8 +71,13 @@ class CesiumModelManager:
         splat_path = os.path.join(temp_dir, f'{model_id}.splat')
         convert_gaussians_to_splat(gaussians, splat_path)
         
-        # 转换为file://URL
-        splat_url = f"file://{splat_path}"
+        # 确保HTTP服务器运行
+        if not self.http_server.is_running():
+            self.http_server.start()
+        
+        # 添加文件到HTTP服务器
+        splat_url = self.http_server.add_file(splat_path, f'{model_id}.splat')
+        self.http_files.append(f'{model_id}.splat')
         
         # 加载到Cesium
         self.cesium_widget.load_3dgs(
@@ -175,17 +185,81 @@ class CesiumModelManager:
             )
         else:
             # 如果无法自动检测，使用默认位置并提示用户
-            print("[WARNING] 无法自动检测模型位置，使用默认位置（北京天安门）")
+            print("[WARNING] 无法自动检测模型位置，使用默认位置")
             return self.load_full_model_to_cesium(
-                gaussians, 
-                116.3974,  # 北京天安门经度
-                39.9088,   # 北京天安门纬度
+                gaussians,
+                114.61094544,  # 默认经度
+                30.45790583,   # 默认纬度
                 0.0,       # 海拔
                 model_id=model_id, 
                 scale=scale, 
                 fly_to=fly_to
             )
     
+    def load_local_model(self, file_path: str, longitude: float, latitude: float,
+                        altitude: float = 0.0, scale: float = 1.0,
+                        fly_to: bool = True) -> str:
+        """
+        加载本地模型文件(.ply/.splat)到Cesium
+        
+        Args:
+            file_path: 本地文件路径
+            longitude: 经度
+            latitude: 纬度
+            altitude: 海拔
+            scale: 缩放
+            fly_to: 是否飞到模型
+            
+        Returns:
+            模型ID
+        """
+        if not os.path.exists(file_path):
+            raise FileNotFoundError(f"文件不存在: {file_path}")
+            
+        file_name = os.path.basename(file_path)
+        base_name, ext = os.path.splitext(file_name)
+        
+        # 生成模型ID
+        import time
+        timestamp = int(time.time() * 1000)
+        model_id = f"local_{base_name}_{timestamp}"
+        
+        # 确保HTTP服务器运行
+        if not self.http_server.is_running():
+            self.http_server.start()
+            
+        # 添加文件到HTTP服务器
+        # 注意：这里直接添加源文件，不进行复制转换
+        # 如果是PLY，Cesium端的SplatViewer通常能处理（或者需要转换？）
+        # 根据cesium_viewer.html逻辑，它支持.ply和.splat
+        # 但如果是Gaussian PLY，最好转换为Splat以获得更好性能
+        # 这里先直接加载，如果用户提供的是.ply，前端会尝试解析
+        
+        # 为避免文件名冲突，使用带时间戳的名称
+        server_filename = f"{model_id}{ext}"
+        splat_url = self.http_server.add_file(file_path, server_filename)
+        self.http_files.append(server_filename)
+        
+        # 加载到Cesium
+        self.cesium_widget.load_3dgs(
+            splat_url, longitude, latitude, altitude,
+            scale=scale, fly_to=fly_to
+        )
+        
+        # 保存模型信息
+        self.loaded_models[model_id] = {
+            'type': 'local_file',
+            'file_path': file_path,
+            'geo_location': {
+                'longitude': longitude,
+                'latitude': latitude,
+                'altitude': altitude
+            },
+            'scale': scale
+        }
+        
+        return model_id
+
     def load_segment_to_cesium(self, gaussians, mask: list, segment_id: int,
                               longitude: float, latitude: float, 
                               altitude: float = 0.0, scale: float = 1.0,
@@ -221,8 +295,13 @@ class CesiumModelManager:
         splat_path = os.path.join(temp_dir, f'segment_{segment_id}.splat')
         convert_gaussians_to_splat(gaussians, splat_path, mask_array)
         
-        # 转换为file://URL
-        splat_url = f"file://{splat_path}"
+        # 确保HTTP服务器运行
+        if not self.http_server.is_running():
+            self.http_server.start()
+        
+        # 添加文件到HTTP服务器
+        splat_url = self.http_server.add_file(splat_path, f'segment_{segment_id}.splat')
+        self.http_files.append(f'segment_{segment_id}.splat')
         
         # 加载到Cesium
         self.cesium_widget.load_segment(
@@ -267,9 +346,28 @@ class CesiumModelManager:
             # 从Cesium中移除
             self.cesium_widget.remove_model(model_id)
             
-            # 清理临时文件
+            # 从HTTP服务器移除文件
             model_info = self.loaded_models[model_id]
-            if os.path.exists(model_info['temp_dir']):
+            if model_info['type'] == 'full_model':
+                file_name = f"{model_id}.splat"
+            elif model_info['type'] == 'local_file':
+                # 对于本地文件，我们需要找回当时生成的服务器文件名
+                # 因为文件名包含了原始扩展名
+                file_path = model_info.get('file_path', '')
+                _, ext = os.path.splitext(file_path)
+                file_name = f"{model_id}{ext}"
+            else:  # segment
+                file_name = f"segment_{model_info['segment_id']}.splat"
+            
+            try:
+                self.http_server.remove_file(file_name)
+                if file_name in self.http_files:
+                    self.http_files.remove(file_name)
+            except Exception as e:
+                print(f"[CesiumModelManager] 移除HTTP文件失败: {e}")
+            
+            # 清理临时文件
+            if 'temp_dir' in model_info and os.path.exists(model_info['temp_dir']):
                 shutil.rmtree(model_info['temp_dir'])
             
             # 从管理器中移除
@@ -280,6 +378,13 @@ class CesiumModelManager:
         # 从Cesium中清除
         self.cesium_widget.clear_all()
         
+        # 从HTTP服务器移除文件
+        for file_path in self.http_files:
+            try:
+                self.http_server.remove_file(file_path)
+            except Exception as e:
+                print(f"[CesiumModelManager] 移除HTTP文件失败: {e}")
+        
         # 清理所有临时文件
         for temp_dir in self.temp_dirs:
             if os.path.exists(temp_dir):
@@ -288,6 +393,7 @@ class CesiumModelManager:
         # 清空管理器
         self.loaded_models.clear()
         self.temp_dirs.clear()
+        self.http_files.clear()
     
     def get_model_info(self, model_id: str = None) -> Dict:
         """
@@ -367,6 +473,14 @@ class CesiumModelManager:
     
     def __del__(self):
         """析构函数，清理临时文件"""
+        # 从HTTP服务器移除文件
+        for file_path in self.http_files:
+            try:
+                self.http_server.remove_file(file_path)
+            except:
+                pass  # 忽略清理错误
+        
+        # 清理临时目录
         for temp_dir in self.temp_dirs:
             if os.path.exists(temp_dir):
                 try:

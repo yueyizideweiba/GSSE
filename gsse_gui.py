@@ -207,13 +207,21 @@ except ImportError as e:
 try:
     from cesium_widget import CesiumWidget, CesiumPanel
     from gis_converter import (
-        CoordinateTransformer, GaussianSplattingToGIS, 
+        CoordinateTransformer, GaussianSplattingToGIS,
         GeoDataConfig, PRESET_LOCATIONS
     )
     GIS_AVAILABLE = True
 except ImportError as e:
     GIS_AVAILABLE = False
     print(f"警告: GIS模块不可用: {e}")
+
+# Import HTTP server
+try:
+    from temp_http_server import start_global_server, stop_global_server, get_global_server
+    HTTP_SERVER_AVAILABLE = True
+except ImportError as e:
+    HTTP_SERVER_AVAILABLE = False
+    print(f"警告: HTTP服务器模块不可用: {e}")
 
 
 class MemoryManager:
@@ -1508,6 +1516,10 @@ class GSSEGUI(QMainWindow):
         self.geo_config = None  # 地理数据配置
         self.coordinate_transformer = None  # 坐标转换器
         
+        # HTTP服务器相关状态变量
+        self.http_server = None  # HTTP服务器实例
+        self.http_server_started = False  # HTTP服务器是否已启动
+        
         # 主题管理
         self.settings = QSettings("GSSE", "GSSEGUI")
         self.current_theme = self.settings.value("theme", "dark", type=str)  # 默认深色主题
@@ -1548,6 +1560,9 @@ class GSSEGUI(QMainWindow):
             self.viewer_timer.start(100)  # 每100ms更新一次相机参数
         
         self.update_system_info()
+        
+        # 启动HTTP服务器
+        self.start_http_server()
         
         # 添加欢迎日志
         self.log("=== GSSE (Gaussian Splatting Semantic Editor) 图形化界面已启动 ===", "info")
@@ -1652,6 +1667,36 @@ class GSSEGUI(QMainWindow):
             self._sidebar_adjusted = True
             # 使用定时器延迟调整，确保布局已完成
             QTimer.singleShot(100, self._adjust_sidebar_width)
+    
+    def closeEvent(self, event):
+        """窗口关闭事件"""
+        try:
+            # 停止HTTP服务器
+            self.stop_http_server()
+            
+            # 停止所有正在运行的进程
+            if self.is_colmap_processing and self.colmap_processor:
+                self.colmap_processor.stop_processing()
+            
+            if self.is_training and self.training_process:
+                self.training_process.terminate()
+                
+            if self.is_sog_training and self.sog_process:
+                self.sog_process.terminate()
+                
+            if self.sibr_process:
+                self.sibr_process.terminate()
+            
+            # 清理GPU内存
+            MemoryManager.clear_gpu_memory()
+            
+            self.log("程序正在关闭，已清理所有资源", "info")
+            
+        except Exception as e:
+            print(f"关闭程序时出错: {e}")
+        
+        # 接受关闭事件
+        event.accept()
     
     def _adjust_sidebar_width(self):
         """调整边栏宽度以适应内容"""
@@ -2787,7 +2832,7 @@ class GSSEGUI(QMainWindow):
             self.gis_longitude_input = QDoubleSpinBox()
             self.gis_longitude_input.setRange(-180.0, 180.0)
             self.gis_longitude_input.setDecimals(6)
-            self.gis_longitude_input.setValue(116.3974)  # 默认北京
+            self.gis_longitude_input.setValue(114.610945)  # 默认坐标
             self.gis_longitude_input.setSuffix("°")
             lon_layout.addWidget(self.gis_longitude_input)
             gis_config_layout.addLayout(lon_layout)
@@ -2798,7 +2843,7 @@ class GSSEGUI(QMainWindow):
             self.gis_latitude_input = QDoubleSpinBox()
             self.gis_latitude_input.setRange(-90.0, 90.0)
             self.gis_latitude_input.setDecimals(6)
-            self.gis_latitude_input.setValue(39.9088)  # 默认北京
+            self.gis_latitude_input.setValue(30.457906)  # 默认坐标
             self.gis_latitude_input.setSuffix("°")
             lat_layout.addWidget(self.gis_latitude_input)
             gis_config_layout.addLayout(lat_layout)
@@ -2916,15 +2961,15 @@ class GSSEGUI(QMainWindow):
             self.gis_load_to_cesium_btn.setEnabled(False)
             gis_load_layout.addWidget(self.gis_load_to_cesium_btn)
             
+            # 加载本地文件到Cesium按钮
+            self.gis_load_local_file_btn = QPushButton("加载本地模型文件(.ply/.splat)")
+            self.gis_load_local_file_btn.clicked.connect(self.load_local_model_to_cesium)
+            gis_load_layout.addWidget(self.gis_load_local_file_btn)
+            
             # 清除Cesium按钮
             self.gis_clear_cesium_btn = QPushButton("清除Cesium场景")
             self.gis_clear_cesium_btn.clicked.connect(self.clear_cesium_scene)
             gis_load_layout.addWidget(self.gis_clear_cesium_btn)
-            
-            # 飞到模型按钮
-            self.gis_fly_to_model_btn = QPushButton("飞到模型位置")
-            self.gis_fly_to_model_btn.clicked.connect(self.fly_to_model)
-            gis_load_layout.addWidget(self.gis_fly_to_model_btn)
             
             gis_load_group.setLayout(gis_load_layout)
             gis_tab_layout.addWidget(gis_load_group)
@@ -4051,6 +4096,9 @@ GSSE - Gaussian Splatting Semantic Editor
             # 1. 停止所有正在运行的进程
             self.log("正在停止所有进程...", "info")
             
+            # 停止HTTP服务器
+            self.stop_http_server()
+            
             # 停止COLMAP处理
             if self.is_colmap_processing and self.colmap_processor:
                 try:
@@ -4257,6 +4305,52 @@ GSSE - Gaussian Splatting Semantic Editor
                 f'重置系统时发生错误:\n{str(e)}',
                 QMessageBox.Ok
             )
+    
+    def start_http_server(self):
+        """启动HTTP服务器"""
+        if not HTTP_SERVER_AVAILABLE:
+            self.log("HTTP服务器模块不可用，跳过启动", "warning")
+            return
+        
+        if self.http_server_started:
+            self.log("HTTP服务器已在运行", "info")
+            return
+        
+        try:
+            self.log("正在启动HTTP服务器...", "info")
+            self.http_server = get_global_server()
+            
+            if self.http_server.start():
+                self.http_server_started = True
+                port = self.http_server.get_port()
+                base_url = self.http_server.get_base_url()
+                self.log(f"HTTP服务器启动成功: {base_url}", "info")
+                self.log("HTTP服务器将用于Cesium文件传输，解决file://协议限制", "info")
+            else:
+                self.log("HTTP服务器启动失败", "error")
+                
+        except Exception as e:
+            self.log(f"启动HTTP服务器时出错: {str(e)}", "error")
+    
+    def stop_http_server(self):
+        """停止HTTP服务器"""
+        if not HTTP_SERVER_AVAILABLE or not self.http_server_started:
+            return
+        
+        try:
+            self.log("正在停止HTTP服务器...", "info")
+            if self.http_server:
+                self.http_server.stop()
+            
+            # 也停止全局服务器
+            stop_global_server()
+            
+            self.http_server_started = False
+            self.http_server = None
+            self.log("HTTP服务器已停止", "info")
+            
+        except Exception as e:
+            self.log(f"停止HTTP服务器时出错: {str(e)}", "error")
     
     def clear_gpu_memory(self):
         """清理GPU内存"""
@@ -9915,8 +10009,22 @@ COLMAP输出: {colmap_output_path}
             rotation_deg = float(self.gis_rotation_input.value())
             rotation_z = np.radians(rotation_deg)
             
-            # 将文件路径转换为file:// URL
-            splat_url = f"file://{os.path.abspath(splat_path)}"
+            # 使用HTTP服务器提供文件访问
+            if self.http_server_started and HTTP_SERVER_AVAILABLE:
+                 http_server = get_global_server()
+                 if http_server:
+                    # 生成唯一的文件名
+                    import time
+                    timestamp = int(time.time() * 1000)
+                    filename = f"model_{timestamp}.splat"
+                    splat_url = http_server.add_file(splat_path, filename)
+                    self.log(f"已通过HTTP服务器提供文件: {splat_url}", "info")
+                 else:
+                    self.log("HTTP服务器未启动，无法加载模型到Cesium", "error")
+                    return
+            else:
+                self.log("HTTP服务器不可用，无法加载模型到Cesium", "error")
+                return
             
             self.log(f"模型已转换为.splat格式", "info")
             self.log(f"位置: ({lon:.6f}, {lat:.6f}, {alt:.2f})", "info")
@@ -9940,6 +10048,46 @@ COLMAP输出: {colmap_output_path}
             self.log(f"详细错误: {traceback.format_exc()}", "error")
             QMessageBox.critical(self, "错误", f"加载到Cesium失败: {e}")
     
+    def load_local_model_to_cesium(self):
+        """加载本地模型文件到Cesium"""
+        if not GIS_AVAILABLE or self.cesium_widget is None:
+            QMessageBox.warning(self, "警告", "请先加载Cesium视图")
+            return
+            
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择模型文件", "", "Gaussian Splat Files (*.ply *.splat *.ksplat);;All Files (*)"
+        )
+        
+        if not file_path:
+            return
+            
+        try:
+            self.log(f"正在加载本地模型: {file_path}", "info")
+            
+            # 获取当前设置的位置
+            lon = float(self.gis_longitude_input.value())
+            lat = float(self.gis_latitude_input.value())
+            alt = float(self.gis_altitude_input.value())
+            scale = float(self.gis_scale_input.value())
+            
+            from cesium_model_manager import CesiumModelManager
+            # 注意：这里应该复用已有的manager实例，但当前架构是在load_model_to_cesium中临时创建的
+            # 最好将manager作为类成员
+            if not hasattr(self, 'cesium_model_manager'):
+                self.cesium_model_manager = CesiumModelManager(self.cesium_widget)
+            
+            model_id = self.cesium_model_manager.load_local_model(
+                file_path, lon, lat, alt, scale=scale, fly_to=True
+            )
+            
+            self.log(f"本地模型加载成功: {model_id}", "info")
+            
+        except Exception as e:
+            import traceback
+            self.log(f"加载本地模型失败: {e}", "error")
+            self.log(f"详细错误: {traceback.format_exc()}", "error")
+            QMessageBox.critical(self, "错误", f"加载失败: {e}")
+
     def clear_cesium_scene(self):
         """清除Cesium场景"""
         if not GIS_AVAILABLE or self.cesium_widget is None:
@@ -9947,19 +10095,6 @@ COLMAP输出: {colmap_output_path}
         
         self.cesium_widget.clear_all()
         self.log("已清除Cesium场景", "info")
-    
-    def fly_to_model(self):
-        """飞到模型位置"""
-        if not GIS_AVAILABLE or self.cesium_widget is None:
-            return
-        
-        # 设置相机到配置的原点位置
-        lon = self.gis_longitude_input.value()
-        lat = self.gis_latitude_input.value()
-        alt = self.gis_altitude_input.value()
-        
-        self.cesium_widget.set_camera(lon, lat, alt + 500, heading=0, pitch=-45, roll=0)
-        self.log(f"相机已移动到 ({lon:.6f}, {lat:.6f}, {alt:.2f})", "info")
     
     def on_cesium_viewer_ready(self):
         """Cesium viewer准备就绪回调"""
