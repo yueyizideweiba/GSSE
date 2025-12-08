@@ -7,10 +7,12 @@ Cesium Widget for PyQt5
 import os
 import json
 from typing import Optional, Dict, Any
-from PyQt5.QtCore import QUrl, pyqtSlot, pyqtSignal, QObject
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMessageBox
+from PyQt5.QtCore import QUrl, pyqtSlot, pyqtSignal, QObject, Qt
+from PyQt5.QtGui import QImage, QPixmap
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QMessageBox, QFrame
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
+from gesture_controller import GestureController
 
 
 class PyBridge(QObject):
@@ -282,7 +284,65 @@ class CesiumWidget(QWidget):
         }
         self.send_message(message)
         
-    def load_segment(self, splat_url: str, longitude: float, latitude: float, 
+    def move_camera(self, x: float = 0.0, y: float = 0.0, z: float = 0.0):
+        """
+        相对移动相机
+        Args:
+            x: 左右移动量
+            y: 上下移动量
+            z: 前后移动量
+        """
+        message = {
+            'type': 'moveCamera',
+            'data': {
+                'x': float(x),
+                'y': float(y),
+                'z': float(z)
+            }
+        }
+        self.send_message(message)
+        
+    def zoom_camera(self, amount: float):
+        """
+        缩放相机
+        Args:
+            amount: 缩放量 (正数为放大，负数为缩小)
+        """
+        message = {
+            'type': 'zoomCamera',
+            'data': {
+                'amount': float(amount)
+            }
+        }
+        self.send_message(message)
+        
+    def rotate_camera(self, heading: float = 0.0, pitch: float = 0.0):
+        """
+        旋转相机
+        Args:
+            heading: 左右旋转量 (弧度)
+            pitch: 上下旋转量 (弧度)
+        """
+        message = {
+            'type': 'rotateCamera',
+            'data': {
+                'heading': float(heading),
+                'pitch': float(pitch)
+            }
+        }
+        self.send_message(message)
+
+    def reset_view(self):
+        """重置视角"""
+        message = {'type': 'resetView'}
+        self.send_message(message)
+
+    def set_top_view(self):
+        """设置为俯视图"""
+        message = {'type': 'setTopView'}
+        self.send_message(message)
+
+    def load_segment(self, splat_url: str, longitude: float, latitude: float,
                      segment_id: int, altitude: float = 0.0, scale: float = 1.0,
                      rotation_x: float = 0.0, rotation_y: float = 0.0, 
                      rotation_z: float = 0.0, fly_to: bool = True):
@@ -413,12 +473,17 @@ class CesiumPanel(QWidget):
         """
         super().__init__(parent)
         self.cesium_widget = None
+        self.gesture_controller = None
         self.init_ui()
         
     def init_ui(self):
         """初始化用户界面"""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+        
+        # 外部UI组件引用
+        self.gesture_btn = None
+        self.camera_label = None
         
         # 创建Cesium widget
         self.cesium_widget = CesiumWidget()
@@ -428,7 +493,68 @@ class CesiumPanel(QWidget):
         self.cesium_widget.viewer_ready.connect(self.on_viewer_ready)
         self.cesium_widget.load_complete.connect(self.on_load_complete)
         self.cesium_widget.object_clicked.connect(self.on_object_clicked)
+
+    def setup_gesture_control(self, btn: QPushButton, label: QLabel):
+        """
+        设置手势控制UI组件
         
+        Args:
+            btn: 启用/停止按钮
+            label: 摄像头预览标签
+        """
+        self.gesture_btn = btn
+        self.camera_label = label
+        
+        self.gesture_btn.setCheckable(True)
+        self.gesture_btn.clicked.connect(self.toggle_gesture_control)
+        
+        # 默认隐藏预览
+        self.camera_label.hide()
+        
+    def toggle_gesture_control(self, checked):
+        """切换手势控制状态"""
+        if checked:
+            if not self.gesture_controller:
+                self.gesture_controller = GestureController()
+                self.gesture_controller.move_signal.connect(self.cesium_widget.move_camera)
+                self.gesture_controller.zoom_signal.connect(self.cesium_widget.zoom_camera)
+                self.gesture_controller.rotate_signal.connect(self.cesium_widget.rotate_camera)
+                self.gesture_controller.reset_signal.connect(self.cesium_widget.reset_view)
+                self.gesture_controller.top_view_signal.connect(self.cesium_widget.set_top_view)
+                self.gesture_controller.frame_signal.connect(self.update_camera_feed)
+            
+            if self.camera_label:
+                self.camera_label.show()
+            self.gesture_controller.start()
+            if self.gesture_btn:
+                self.gesture_btn.setText("停止手势控制")
+        else:
+            if self.gesture_controller:
+                self.gesture_controller.stop()
+            if self.camera_label:
+                self.camera_label.hide()
+                self.camera_label.clear()
+            if self.gesture_btn:
+                self.gesture_btn.setText("启用手势控制")
+
+    def update_camera_feed(self, image):
+        """更新摄像头预览"""
+        if image is None or self.camera_label is None:
+            return
+            
+        try:
+            height, width, channel = image.shape
+            bytes_per_line = 3 * width
+            q_image = QImage(image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+            
+            # 缩放到标签大小
+            pixmap = QPixmap.fromImage(q_image).scaled(
+                self.camera_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation
+            )
+            self.camera_label.setPixmap(pixmap)
+        except Exception as e:
+            print(f"Error updating camera feed: {e}")
+
     def on_viewer_ready(self):
         """Viewer准备就绪"""
         print("[CesiumPanel] Cesium viewer已准备就绪")
@@ -451,6 +577,12 @@ class CesiumPanel(QWidget):
             CesiumWidget实例
         """
         return self.cesium_widget
+
+    def closeEvent(self, event):
+        """关闭事件处理"""
+        if self.gesture_controller:
+            self.gesture_controller.stop()
+        event.accept()
 
 
 if __name__ == '__main__':

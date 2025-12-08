@@ -214,7 +214,6 @@
                 <option value="bing" selected>Bing Maps</option>
                 <option value="osm">OpenStreetMap</option>
                 <option value="arcgis">ArcGIS World Imagery</option>
-            </select>
         </div>
         
         <div class="toolbar-section">
@@ -375,6 +374,21 @@
                     break;
                 case 'getModelInfo':
                     getModelInfo(message.data);
+                    break;
+                case 'moveCamera':
+                    moveCamera(message.data);
+                    break;
+                case 'zoomCamera':
+                    zoomCamera(message.data);
+                    break;
+                case 'rotateCamera':
+                    rotateCamera(message.data);
+                    break;
+                case 'resetView':
+                    resetView();
+                    break;
+                case 'setTopView':
+                    setTopView();
                     break;
                 default:
                     console.log('[Cesium JS Info] 未知消息类型:', message.type);
@@ -542,7 +556,7 @@
                 terrainProvider: new Cesium.EllipsoidTerrainProvider(),
                 timeline: false,
                 animation: false,
-                baseLayerPicker: true, // 允许用户切换不同地图
+                baseLayerPicker: true, 
                 geocoder: false,
                 homeButton: true,
                 sceneModePicker: true,
@@ -566,8 +580,7 @@
                     }
                 }, 100);
             }
-            
-            // 使用Cesium默认底图，不做干预
+             // 使用Cesium默认底图，不做干预
             
             // 在file://协议下，设置地球为单色（蓝色）
             if (isFileProtocol) {
@@ -583,10 +596,10 @@
                             // });
                         } catch (e) {
                             console.log('[Cesium JS Info] 设置地球颜色失败:', e);
+                            	                        }
                         }
-                    }
-                }, 200);
-            }
+                    }, 200);
+                }
             
             // 初始化Three.js场景
             initThreeScene();
@@ -599,7 +612,7 @@
             // 添加地形和影像选择事件监听器
             document.getElementById('terrainSelect').addEventListener('change', updateTerrain);
             document.getElementById('imagerySelect').addEventListener('change', updateImagery);
-            
+
             // 启动场景信息更新
             startInfoUpdate();
             
@@ -931,7 +944,7 @@
                 }
             } catch (error) {
                 console.error(`[Cesium JS Error] 创建影像图层失败(${value}):`, error);
-                if (!fallbackAttempted && value !== 'osm') {
+                 if (!fallbackAttempted && value !== 'osm') {
                     console.log('[Cesium JS Info] 回退到OpenStreetMap影像');
                     select.value = 'osm';
                     updateImagery(true);
@@ -944,7 +957,7 @@
                 return;
             }
             
-            let oldLayer = null;
+             let oldLayer = null;
             if (cesiumViewer.imageryLayers.length > 0) {
                 oldLayer = cesiumViewer.imageryLayers.get(0);
             }
@@ -954,16 +967,17 @@
                 newLayer = cesiumViewer.imageryLayers.addImageryProvider(provider);
             } catch (error) {
                 console.error(`[Cesium JS Error] 添加影像图层失败(${value}):`, error);
-                if (!fallbackAttempted && value !== 'osm') {
+                 if (!fallbackAttempted && value !== 'osm') {
                     console.log('[Cesium JS Info] 回退到OpenStreetMap影像');
                     select.value = 'osm';
                     updateImagery(true);
                 }
                 return;
             }
-
-            if (oldLayer) {
+            
+           if (oldLayer) {
                 cesiumViewer.imageryLayers.remove(oldLayer);
+            
             }
 
             if (provider.readyPromise && typeof provider.readyPromise.then === 'function') {
@@ -971,14 +985,13 @@
                     console.log(`[Cesium JS Info] 影像图层已准备就绪: ${value}`);
                 }).catch(function(error) {
                     console.error(`[Cesium JS Error] 影像图层加载失败(${value}):`, error);
-                    if (!fallbackAttempted && value !== 'osm') {
+                     if (!fallbackAttempted && value !== 'osm') {
                         console.log('[Cesium JS Info] 回退到OpenStreetMap影像');
                         select.value = 'osm';
                         updateImagery(true);
                     }
                 });
             }
-
             if (provider.errorEvent && typeof provider.errorEvent.addEventListener === 'function') {
                 provider.errorEvent.addEventListener(function(error) {
                     console.error(`[Cesium JS Error] 影像图层请求错误(${value}):`, error);
@@ -1476,6 +1489,81 @@
             });
         }
         
+        // 相对移动相机（平移）
+        function moveCamera(data) {
+            if (!cesiumViewer) return;
+            
+            const dx = data.x || 0; // 左右移动
+            const dy = data.y || 0; // 上下移动
+            const dz = data.z || 0; // 前后移动
+            
+            // 获取当前相机高度，用于调整移动速度
+            const height = cesiumViewer.camera.positionCartographic.height;
+            const moveFactor = height / 1000.0; // 根据高度调整移动速度
+            
+            if (dx !== 0) {
+                cesiumViewer.camera.moveRight(dx * moveFactor);
+            }
+            if (dy !== 0) {
+                cesiumViewer.camera.moveUp(dy * moveFactor);
+            }
+            if (dz !== 0) {
+                cesiumViewer.camera.moveForward(dz * moveFactor);
+            }
+        }
+        
+        // 缩放相机
+        function zoomCamera(data) {
+            if (!cesiumViewer) return;
+            
+            const amount = data.amount || 0;
+            const height = cesiumViewer.camera.positionCartographic.height;
+            
+            // 限制最小高度
+            if (amount > 0 && height < 10) return;
+            
+            cesiumViewer.camera.zoomIn(amount * height * 0.1);
+        }
+        
+        // 旋转相机
+        function rotateCamera(data) {
+            if (!cesiumViewer) return;
+            
+            const heading = data.heading || 0; // 左右旋转
+            const pitch = data.pitch || 0;     // 上下旋转
+            
+            if (heading !== 0) {
+                cesiumViewer.camera.lookRight(heading);
+            }
+            if (pitch !== 0) {
+                cesiumViewer.camera.lookUp(pitch);
+            }
+        }
+
+        function resetView() {
+            if (!cesiumViewer) return;
+            cesiumViewer.camera.flyHome(1.0);
+        }
+
+        function setTopView() {
+            if (!cesiumViewer) return;
+            const camera = cesiumViewer.camera;
+            const cartographic = camera.positionCartographic;
+            
+            cesiumViewer.camera.flyTo({
+                destination: Cesium.Cartesian3.fromRadians(
+                    cartographic.longitude,
+                    cartographic.latitude,
+                    cartographic.height
+                ),
+                orientation: {
+                    heading: 0.0,
+                    pitch: Cesium.Math.toRadians(-90.0),
+                    roll: 0.0
+                }
+            });
+        }
+
         function flyToModel() {
             if (!cesiumViewer) {
                 console.log('[Cesium JS Info] Cesium viewer未初始化');

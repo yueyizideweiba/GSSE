@@ -2974,6 +2974,31 @@ class GSSEGUI(QMainWindow):
             gis_load_group.setLayout(gis_load_layout)
             gis_tab_layout.addWidget(gis_load_group)
             
+            # 手势控制组
+            gis_gesture_group = QGroupBox("手势控制")
+            gis_gesture_layout = QVBoxLayout()
+            
+            # 启用按钮
+            self.gis_gesture_btn = QPushButton("启用手势控制")
+            gis_gesture_layout.addWidget(self.gis_gesture_btn)
+            
+            # 摄像头预览
+            self.gis_camera_label = QLabel()
+            self.gis_camera_label.setFixedSize(320, 240)
+            self.gis_camera_label.setStyleSheet("background-color: black; border: 1px solid #555;")
+            self.gis_camera_label.setAlignment(Qt.AlignCenter)
+            self.gis_camera_label.hide() # 默认隐藏
+            
+            # 居中显示摄像头画面
+            camera_container = QHBoxLayout()
+            camera_container.addStretch()
+            camera_container.addWidget(self.gis_camera_label)
+            camera_container.addStretch()
+            gis_gesture_layout.addLayout(camera_container)
+            
+            gis_gesture_group.setLayout(gis_gesture_layout)
+            gis_tab_layout.addWidget(gis_gesture_group)
+            
             # 状态显示
             self.gis_status_label = QLabel("GIS模块已就绪")
             self.gis_status_label.setStyleSheet("color: #5BA3D8; padding: 5px;")
@@ -3276,6 +3301,11 @@ class GSSEGUI(QMainWindow):
         if GIS_AVAILABLE:
             self.cesium_panel = CesiumPanel()
             self.cesium_widget = self.cesium_panel.get_cesium_widget()
+            
+            # 设置手势控制组件
+            if hasattr(self, 'gis_gesture_btn') and hasattr(self, 'gis_camera_label'):
+                self.cesium_panel.setup_gesture_control(self.gis_gesture_btn, self.gis_camera_label)
+            
             # 连接Cesium信号
             self.cesium_widget.viewer_ready.connect(self.on_cesium_viewer_ready)
             self.cesium_widget.load_complete.connect(self.on_cesium_load_complete)
