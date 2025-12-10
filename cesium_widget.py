@@ -24,6 +24,8 @@ class PyBridge(QObject):
     load_complete = pyqtSignal(bool, str)  # 加载完成 (success, message)
     object_clicked = pyqtSignal(dict)  # 对象被点击
     edit_mode_changed = pyqtSignal(bool)  # 编辑模式改变
+    screenshot_captured = pyqtSignal(dict)  # 截图已捕获
+    corner_points_calculated = pyqtSignal(dict)  # 角点已计算
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -53,6 +55,13 @@ class PyBridge(QObject):
             elif msg_type == 'editModeChanged':
                 enabled = data.get('enabled', False)
                 self.edit_mode_changed.emit(enabled)
+            elif msg_type == 'screenshotCaptured':
+                self.screenshot_captured.emit(data)
+            elif msg_type == 'cornerPoints3DCalculated':
+                self.corner_points_calculated.emit(data)
+            elif msg_type == 'contourPoints3DCalculated':
+                # 轮廓点计算完成，可以在这里处理结果
+                print(f"[PyBridge] 收到轮廓3D坐标计算结果: contourId={data.get('data', {}).get('contourId', 'unknown')}")
             else:
                 self.message_received.emit(message)
                 
@@ -619,4 +628,5 @@ if __name__ == '__main__':
     panel.cesium_widget.viewer_ready.connect(test_load)
     
     sys.exit(app.exec_())
+
 

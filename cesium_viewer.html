@@ -59,6 +59,13 @@
                     console.log('[Cesium JS Info] GaussianSplats3D库已加载');
                     console.log('[Cesium JS Info] 可用的GaussianSplats3D属性:', Object.keys(GaussianSplats3D));
                     console.log('[Cesium JS Info] GaussianSplats3D.Viewer类已正确加载');
+                    
+                    // 检查Raycaster是否可用
+                    if (typeof GaussianSplats3D.Raycaster !== 'undefined') {
+                        console.log('[Cesium JS Info] GaussianSplats3D.Raycaster类已正确加载');
+                    } else {
+                        console.warn('[Cesium JS Warning] GaussianSplats3D.Raycaster类不可用，可能需要更新库文件');
+                    }
                 } else {
                     console.error('[Cesium JS Error] GaussianSplats3D库未加载或Viewer类未定义');
                     console.log('[Cesium JS Info] 检查全局对象:', {
@@ -214,6 +221,7 @@
                 <option value="bing" selected>Bing Maps</option>
                 <option value="osm">OpenStreetMap</option>
                 <option value="arcgis">ArcGIS World Imagery</option>
+            </select>
         </div>
         
         <div class="toolbar-section">
@@ -389,6 +397,21 @@
                     break;
                 case 'setTopView':
                     setTopView();
+                    break;
+                case 'captureScreenshot':
+                    captureScreenshot(message.data);
+                    break;
+                case 'calculateCornerPoints3D':
+                    calculateCornerPoints3D(message.data);
+                    break;
+                case 'calculateContourPoints3D':
+                    calculateContourPoints3D(message.data);
+                    break;
+                case 'getCameraMatrices':
+                    getCameraMatrices();
+                    break;
+                case 'addPointLabels':
+                    addPointLabels(message.data);
                     break;
                 default:
                     console.log('[Cesium JS Info] 未知消息类型:', message.type);
@@ -944,7 +967,7 @@
                 }
             } catch (error) {
                 console.error(`[Cesium JS Error] 创建影像图层失败(${value}):`, error);
-                 if (!fallbackAttempted && value !== 'osm') {
+                if (!fallbackAttempted && value !== 'osm') {
                     console.log('[Cesium JS Info] 回退到OpenStreetMap影像');
                     select.value = 'osm';
                     updateImagery(true);
@@ -957,7 +980,7 @@
                 return;
             }
             
-             let oldLayer = null;
+            let oldLayer = null;
             if (cesiumViewer.imageryLayers.length > 0) {
                 oldLayer = cesiumViewer.imageryLayers.get(0);
             }
@@ -967,17 +990,16 @@
                 newLayer = cesiumViewer.imageryLayers.addImageryProvider(provider);
             } catch (error) {
                 console.error(`[Cesium JS Error] 添加影像图层失败(${value}):`, error);
-                 if (!fallbackAttempted && value !== 'osm') {
+                if (!fallbackAttempted && value !== 'osm') {
                     console.log('[Cesium JS Info] 回退到OpenStreetMap影像');
                     select.value = 'osm';
                     updateImagery(true);
                 }
                 return;
             }
-            
-           if (oldLayer) {
+
+            if (oldLayer) {
                 cesiumViewer.imageryLayers.remove(oldLayer);
-            
             }
 
             if (provider.readyPromise && typeof provider.readyPromise.then === 'function') {
@@ -985,7 +1007,7 @@
                     console.log(`[Cesium JS Info] 影像图层已准备就绪: ${value}`);
                 }).catch(function(error) {
                     console.error(`[Cesium JS Error] 影像图层加载失败(${value}):`, error);
-                     if (!fallbackAttempted && value !== 'osm') {
+                    if (!fallbackAttempted && value !== 'osm') {
                         console.log('[Cesium JS Info] 回退到OpenStreetMap影像');
                         select.value = 'osm';
                         updateImagery(true);
@@ -1562,6 +1584,1055 @@
                     roll: 0.0
                 }
             });
+        }
+        
+        // 截图功能：合并Cesium和Three.js的canvas，不包含UI面板
+        function captureScreenshot(data) {
+            try {
+                if (!cesiumViewer || !cesiumViewer.scene) {
+                    console.error('[Cesium JS Error] Cesium viewer未初始化');
+                    return;
+                }
+                
+                // 等待一帧渲染完成后再截图
+                cesiumViewer.scene.render();
+                
+                // 使用requestAnimationFrame确保渲染完成
+                requestAnimationFrame(function() {
+                    const cesiumCanvas = cesiumViewer.scene.canvas;
+                    if (!cesiumCanvas || cesiumCanvas.width === 0 || cesiumCanvas.height === 0) {
+                        console.error('[Cesium JS Error] Cesium Canvas无效');
+                        return;
+                    }
+                    
+                    // 获取Three.js渲染器的canvas
+                    let threeCanvas = null;
+                    if (threeRenderer && threeRenderer.domElement) {
+                        threeCanvas = threeRenderer.domElement;
+                    }
+                    
+                    // 创建合并的canvas
+                    const mergedCanvas = document.createElement('canvas');
+                    mergedCanvas.width = cesiumCanvas.width;
+                    mergedCanvas.height = cesiumCanvas.height;
+                    const ctx = mergedCanvas.getContext('2d');
+                    
+                    // 先绘制Cesium场景（作为背景）
+                    ctx.drawImage(cesiumCanvas, 0, 0);
+                    
+                    // 如果有Three.js canvas，叠加绘制（Three.js渲染的内容在Cesium之上）
+                    if (threeCanvas && threeCanvas.width > 0 && threeCanvas.height > 0) {
+                        // Three.js canvas可能尺寸不同，需要缩放
+                        ctx.drawImage(threeCanvas, 0, 0, mergedCanvas.width, mergedCanvas.height);
+                    }
+                    
+                    // 将合并后的canvas转换为base64图像
+                    const dataURL = mergedCanvas.toDataURL('image/png');
+                    
+                    // 通过pyBridge发送回Python
+                    if (pyBridge && pyBridge.receiveMessage) {
+                        pyBridge.receiveMessage(JSON.stringify({
+                            type: 'screenshotCaptured',
+                            data: {
+                                imageData: dataURL,
+                                width: mergedCanvas.width,
+                                height: mergedCanvas.height
+                            }
+                        }));
+                    } else {
+                        console.error('[Cesium JS Error] pyBridge未初始化');
+                    }
+                });
+            } catch (error) {
+                console.error('[Cesium JS Error] 截图失败:', error);
+            }
+        }
+        
+        // 添加点标签功能
+        function addPointLabels(data) {
+            try {
+                if (!cesiumViewer || !cesiumViewer.scene) {
+                    console.error('[Cesium JS Error] Cesium viewer未初始化');
+                    return;
+                }
+                
+                const points = data.points || [];
+                if (points.length === 0) {
+                    console.warn('[Cesium JS Warning] 没有要显示的点');
+                    return;
+                }
+                
+                // 清除之前的点标签
+                if (window.cornerPointLabels) {
+                    window.cornerPointLabels.forEach(function(label) {
+                        cesiumViewer.entities.remove(label);
+                    });
+                }
+                window.cornerPointLabels = [];
+                
+                // 添加新的点标签
+                points.forEach(function(point, index) {
+                    // 确保longitude和latitude是弧度
+                    const lon = typeof point.longitude === 'number' ? point.longitude : Cesium.Math.toRadians(point.longitude);
+                    const lat = typeof point.latitude === 'number' ? point.latitude : Cesium.Math.toRadians(point.latitude);
+                    
+                    const entity = cesiumViewer.entities.add({
+                        name: `CornerPoint_${index + 1}`,
+                        position: Cesium.Cartesian3.fromRadians(
+                            lon,
+                            lat,
+                            point.height || 0
+                        ),
+                        point: {
+                            pixelSize: 20, // 增大点的大小
+                            color: point.color ? Cesium.Color.fromBytes(point.color[0], point.color[1], point.color[2]) : Cesium.Color.RED,
+                            outlineColor: Cesium.Color.WHITE,
+                            outlineWidth: 3, // 增加轮廓宽度
+                            heightReference: Cesium.HeightReference.NONE, // 不使用贴地，使用绝对高度
+                            disableDepthTestDistance: Number.POSITIVE_INFINITY // 禁用深度测试，确保点始终可见
+                        },
+                        label: {
+                            text: point.label || `P${index + 1}`,
+                            font: '16px sans-serif', // 增大字体
+                            fillColor: Cesium.Color.YELLOW, // 使用黄色标签更明显
+                            outlineColor: Cesium.Color.BLACK,
+                            outlineWidth: 3,
+                            style: Cesium.LabelStyle.FILL_AND_OUTLINE,
+                            pixelOffset: new Cesium.Cartesian2(0, -50), // 调整偏移
+                            verticalOrigin: Cesium.VerticalOrigin.BOTTOM,
+                            disableDepthTestDistance: Number.POSITIVE_INFINITY // 禁用深度测试
+                        }
+                    });
+                    
+                    window.cornerPointLabels.push(entity);
+                    console.log(`[Cesium JS Info] 已添加角点${index + 1}标签，位置: (${Cesium.Math.toDegrees(lon).toFixed(6)}, ${Cesium.Math.toDegrees(lat).toFixed(6)}, ${point.height || 0})`);
+                });
+                
+                console.log(`[Cesium JS Info] 已添加${points.length}个角点标签`);
+            } catch (error) {
+                console.error('[Cesium JS Error] 添加点标签失败:', error);
+            }
+        }
+        
+        // 可视化角点和射线（显示四个交点、四边形和视锥体）
+        function visualizeCornerPointsAndRays(cornerPoints3DThree, threeCamera, pixelPoints, imageWidth, imageHeight) {
+            try {
+                if (!cesiumViewer || !cesiumViewer.scene || !threeCamera) {
+                    console.error('[Cesium JS Error] 无法可视化：viewer或相机未初始化');
+                    return;
+                }
+                
+                if (!cornerPoints3DThree || cornerPoints3DThree.length !== 4) {
+                    console.warn('[Cesium JS Warning] 角点数量不正确，无法可视化');
+                    return;
+                }
+                
+                // 清除之前的可视化
+                clearCornerPointsVisualization();
+                
+                // 1. 在Cesium中显示四个角点（红色点标签）
+                const cornerPointsGeo = [];
+                cornerPoints3DThree.forEach((pt, idx) => {
+                    try {
+                        // 将Three.js坐标转换为Cesium ECEF坐标
+                        const ecefPoint = new Cesium.Cartesian3(pt.x, pt.y, pt.z);
+                        const cartographic = Cesium.Cartographic.fromCartesian(ecefPoint);
+                        
+                        // 检查坐标是否有效
+                        if (isFinite(cartographic.longitude) && isFinite(cartographic.latitude)) {
+                            const lonDeg = Cesium.Math.toDegrees(cartographic.longitude);
+                            const latDeg = Cesium.Math.toDegrees(cartographic.latitude);
+                            
+                            console.log(`[Cesium JS Info] 角点${idx + 1}转换: Three.js(${pt.x.toFixed(2)}, ${pt.y.toFixed(2)}, ${pt.z.toFixed(2)}) -> 地理(${lonDeg.toFixed(6)}, ${latDeg.toFixed(6)}, ${cartographic.height.toFixed(2)})`);
+                            
+                            cornerPointsGeo.push({
+                                longitude: cartographic.longitude, // 已经是弧度
+                                latitude: cartographic.latitude, // 已经是弧度
+                                height: cartographic.height,
+                                label: `P${idx + 1}`,
+                                color: [255, 0, 0] // 红色
+                            });
+                            console.log(`[Cesium JS Info] 角点${idx + 1}添加到cornerPointsGeo，经纬度(弧度): (${cartographic.longitude.toFixed(6)}, ${cartographic.latitude.toFixed(6)})`);
+                        } else {
+                            console.warn(`[Cesium JS Warning] 角点${idx + 1}坐标无效: lon=${cartographic.longitude}, lat=${cartographic.latitude}`);
+                        }
+                    } catch (e) {
+                        console.warn(`[Cesium JS Warning] 无法转换角点${idx + 1}坐标:`, e);
+                    }
+                });
+                
+                console.log(`[Cesium JS Info] 成功转换${cornerPointsGeo.length}个角点坐标`);
+                
+                // 添加角点标签
+                if (cornerPointsGeo.length === 4) {
+                    console.log('[Cesium JS Info] 开始添加角点标签和四边形...');
+                    addPointLabels({ points: cornerPointsGeo });
+                    
+                    // 2. 在Cesium中绘制四边形（连接四个角点）
+                    const positions = cornerPointsGeo.map(pt => {
+                        // 确保使用弧度
+                        const lon = typeof pt.longitude === 'number' ? pt.longitude : Cesium.Math.toRadians(pt.longitude);
+                        const lat = typeof pt.latitude === 'number' ? pt.latitude : Cesium.Math.toRadians(pt.latitude);
+                        const pos = Cesium.Cartesian3.fromRadians(lon, lat, pt.height);
+                        return pos;
+                    });
+                    // 闭合四边形（添加第一个点到最后）
+                    positions.push(positions[0].clone());
+                    
+                    console.log('[Cesium JS Info] 四边形位置数量:', positions.length);
+                    
+                    // 添加贴地版本的四边形
+                    const quadEntity = cesiumViewer.entities.add({
+                        name: 'CornerQuadrilateral',
+                        polyline: {
+                            positions: positions,
+                            width: 5, // 增加线宽使其更明显
+                            material: Cesium.Color.CYAN.withAlpha(0.9), // 增加不透明度
+                            clampToGround: true, // 使用贴地
+                            heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                            arcType: Cesium.ArcType.GEODESIC // 使用测地线
+                        }
+                    });
+                    
+                    // 添加不贴地版本的四边形作为备用
+                    const quadEntity2 = cesiumViewer.entities.add({
+                        name: 'CornerQuadrilateral_NoClamp',
+                        polyline: {
+                            positions: positions,
+                            width: 3,
+                            material: Cesium.Color.YELLOW.withAlpha(0.7),
+                            clampToGround: false,
+                            heightReference: Cesium.HeightReference.NONE
+                        }
+                    });
+                    
+                    if (!window.cornerVisualizationEntities) {
+                        window.cornerVisualizationEntities = [];
+                    }
+                    window.cornerVisualizationEntities.push(quadEntity);
+                    window.cornerVisualizationEntities.push(quadEntity2);
+                    console.log('[Cesium JS Info] 已添加四边形实体（贴地和不贴地版本）');
+                    
+                    // 3. 在Three.js中绘制视锥体射线（从相机到四个角点）
+                    // 优先使用全局threeScene，因为角点坐标是在全局坐标系中
+                    if (threeScene) {
+                        console.log('[Cesium JS Info] 使用全局threeScene绘制射线');
+                        visualizeRaysInThreeJS(cornerPoints3DThree, threeCamera, threeScene);
+                    } else {
+                        // 如果没有全局scene，尝试使用layer的scene
+                        let layerScene = null;
+                        for (let layer of gaussianSplatLayers) {
+                            if (layer.splatViewer && layer.ready && layer.scene) {
+                                layerScene = layer.scene;
+                                break;
+                            }
+                        }
+                        if (layerScene) {
+                            console.log('[Cesium JS Info] 使用layer scene绘制射线');
+                            visualizeRaysInThreeJS(cornerPoints3DThree, threeCamera, layerScene);
+                        } else {
+                            console.warn('[Cesium JS Warning] 无法找到可用的Three.js scene');
+                        }
+                    }
+                    
+                    console.log('[Cesium JS Info] 已可视化四个角点、四边形和视锥体射线');
+                } else {
+                    console.warn('[Cesium JS Warning] 有效的角点数量不足，无法绘制四边形');
+                }
+                
+            } catch (error) {
+                console.error('[Cesium JS Error] 可视化角点和射线失败:', error);
+            }
+        }
+        
+        // 在Three.js中绘制视锥体射线
+        function visualizeRaysInThreeJS(cornerPoints3DThree, threeCamera, scene) {
+            try {
+                if (!scene || !threeCamera) {
+                    console.warn('[Cesium JS Warning] Three.js场景或相机未初始化，无法绘制射线');
+                    return;
+                }
+                
+                console.log('[Cesium JS Info] 开始绘制视锥体射线，scene类型:', scene.constructor.name);
+                
+                // 清除之前的射线
+                if (window.rayLines) {
+                    window.rayLines.forEach(line => {
+                        scene.remove(line);
+                        if (line.geometry) line.geometry.dispose();
+                        if (line.material) line.material.dispose();
+                    });
+                }
+                window.rayLines = [];
+                
+                // 获取相机位置（世界坐标）
+                const cameraPosition = new THREE.Vector3();
+                threeCamera.getWorldPosition(cameraPosition);
+                console.log('[Cesium JS Info] 相机位置:', cameraPosition.x.toFixed(2), cameraPosition.y.toFixed(2), cameraPosition.z.toFixed(2));
+                
+                // 为每个角点创建射线（绿色，表示视锥体）
+                cornerPoints3DThree.forEach((cornerPoint, idx) => {
+                    console.log(`[Cesium JS Info] 绘制射线${idx + 1}: 从相机(${cameraPosition.x.toFixed(2)}, ${cameraPosition.y.toFixed(2)}, ${cameraPosition.z.toFixed(2)}) 到角点(${cornerPoint.x.toFixed(2)}, ${cornerPoint.y.toFixed(2)}, ${cornerPoint.z.toFixed(2)})`);
+                    
+                    // 创建从相机到角点的线段
+                    const geometry = new THREE.BufferGeometry().setFromPoints([
+                        cameraPosition,
+                        cornerPoint
+                    ]);
+                    
+                    // 使用绿色材质（视锥体射线）
+                    const material = new THREE.LineBasicMaterial({
+                        color: 0x00ff00, // 绿色
+                        linewidth: 3, // 增加线宽
+                        transparent: true,
+                        opacity: 0.9 // 增加不透明度
+                    });
+                    
+                    const line = new THREE.Line(geometry, material);
+                    scene.add(line);
+                    window.rayLines.push(line);
+                    console.log(`[Cesium JS Info] 已添加射线${idx + 1}到scene，scene子对象数量:`, scene.children.length);
+                });
+                
+                // 绘制视锥体的边界线（连接四个角点形成四边形，在Three.js中）
+                if (cornerPoints3DThree.length === 4) {
+                    // 创建四边形边框（在Three.js中，使用青色）
+                    const quadGeometry = new THREE.BufferGeometry().setFromPoints([
+                        cornerPoints3DThree[0],
+                        cornerPoints3DThree[1],
+                        cornerPoints3DThree[2],
+                        cornerPoints3DThree[3],
+                        cornerPoints3DThree[0] // 闭合
+                    ]);
+                    
+                    const quadMaterial = new THREE.LineBasicMaterial({
+                        color: 0x00ffff, // 青色
+                        linewidth: 3,
+                        transparent: true,
+                        opacity: 0.9
+                    });
+                    
+                    const quadLine = new THREE.Line(quadGeometry, quadMaterial);
+                    scene.add(quadLine);
+                    window.rayLines.push(quadLine);
+                }
+                
+                console.log('[Cesium JS Info] 已在Three.js中绘制视锥体射线');
+                
+            } catch (error) {
+                console.error('[Cesium JS Error] 在Three.js中绘制射线失败:', error);
+            }
+        }
+        
+        // 清除角点可视化
+        function clearCornerPointsVisualization() {
+            try {
+                // 清除Cesium实体
+                if (window.cornerVisualizationEntities) {
+                    window.cornerVisualizationEntities.forEach(entity => {
+                        cesiumViewer.entities.remove(entity);
+                    });
+                    window.cornerVisualizationEntities = [];
+                }
+                
+                // 清除Three.js射线
+                if (window.rayLines) {
+                    window.rayLines.forEach(line => {
+                        // 尝试从所有可能的scene中移除
+                        if (threeScene) threeScene.remove(line);
+                        // 也尝试从layer scenes中移除
+                        for (let layer of gaussianSplatLayers) {
+                            if (layer.scene) {
+                                try {
+                                    layer.scene.remove(line);
+                                } catch (e) {
+                                    // 忽略错误
+                                }
+                            }
+                        }
+                        if (line.geometry) line.geometry.dispose();
+                        if (line.material) line.material.dispose();
+                    });
+                    window.rayLines = [];
+                }
+                
+                // 清除点标签（如果存在）
+                if (window.cornerPointLabels) {
+                    window.cornerPointLabels.forEach(label => {
+                        cesiumViewer.entities.remove(label);
+                    });
+                    window.cornerPointLabels = [];
+                }
+                
+            } catch (error) {
+                console.error('[Cesium JS Error] 清除可视化失败:', error);
+            }
+        }
+        
+        // 计算角点3D坐标（使用射线检测，将四个角点约束到XZ平面上实现贴地效果）
+        function calculateCornerPoints3D(data) {
+            try {
+                if (!cesiumViewer || !cesiumViewer.scene) {
+                    console.error('[Cesium JS Error] Cesium viewer未初始化');
+                    return;
+                }
+                
+                const imageWidth = data.imageWidth || cesiumViewer.scene.canvas.width;
+                const imageHeight = data.imageHeight || cesiumViewer.scene.canvas.height;
+                const pixelPoints = data.pixelPoints || [];
+                
+                // 获取第一个加载的splat viewer和mesh
+                let splatViewer = null;
+                let splatMesh = null;
+                let threeCamera = null;
+                let threeScene = null;
+                
+                for (let layer of gaussianSplatLayers) {
+                    if (layer.splatViewer && layer.ready) {
+                        splatViewer = layer.splatViewer;
+                        splatMesh = splatViewer.getSplatMesh();
+                        threeCamera = splatViewer.camera;
+                        threeScene = layer.scene;
+                        if (splatMesh && threeCamera && threeScene) break;
+                    }
+                }
+                
+                if (!threeCamera) {
+                    console.warn('[Cesium JS Warning] 未找到可用的THREE.js相机，使用备用方法');
+                    calculateCornerPoints3DWithPlane(data);
+                    return;
+                }
+                
+                // 计算地面高度（XZ平面的Y坐标）
+                // 方法1：尝试从场景边界获取最小Y值
+                let groundY = 0.0;
+                if (modelBoundingSphere && modelBoundingSphere.center && modelBoundingSphere.radius) {
+                    // 使用边界球中心Y坐标减去半径作为地面高度
+                    groundY = modelBoundingSphere.center[1] - modelBoundingSphere.radius;
+                    console.log('[Cesium JS Info] 从边界球计算地面高度:', groundY);
+                } else if (splatMesh) {
+                    // 方法2：从mesh的包围盒获取最小Y值
+                    try {
+                        if (splatMesh.geometry && !splatMesh.geometry.boundingBox) {
+                            splatMesh.geometry.computeBoundingBox();
+                        }
+                        if (splatMesh.geometry && splatMesh.geometry.boundingBox) {
+                            const box = splatMesh.geometry.boundingBox;
+                            const minWorld = new THREE.Vector3(box.min.x, box.min.y, box.min.z);
+                            const maxWorld = new THREE.Vector3(box.max.x, box.max.y, box.max.z);
+                            splatMesh.localToWorld(minWorld);
+                            splatMesh.localToWorld(maxWorld);
+                            groundY = Math.min(minWorld.y, maxWorld.y);
+                            console.log('[Cesium JS Info] 从mesh包围盒计算地面高度:', groundY);
+                        }
+                    } catch (e) {
+                        console.warn('[Cesium JS Warning] 无法从mesh获取地面高度，使用默认值0:', e);
+                    }
+                }
+                
+                // 如果groundY仍然是0，尝试使用第一个角点的临时计算来估算
+                // 但这只是备用方案，主要应该使用上面的方法
+                if (groundY === 0.0 && pixelPoints.length > 0) {
+                    console.warn('[Cesium JS Warning] 地面高度为0，将使用默认值。建议检查场景边界计算。');
+                }
+                
+                console.log('[Cesium JS Info] 最终使用地面高度（Y坐标）:', groundY);
+                
+                // 创建XZ平面（法向量为Y轴正方向，通过groundY点）
+                const planeNormal = new THREE.Vector3(0, 1, 0); // Y轴正方向
+                const planePoint = new THREE.Vector3(0, groundY, 0);
+                const xzPlane = new THREE.Plane(planeNormal, -groundY); // plane.d = -n·point
+                
+                // 创建Three.js的Raycaster用于获取射线
+                const threeRaycaster = new THREE.Raycaster();
+                const cornerPoints3D = [];
+                const cornerPoints3DThree = []; // 存储Three.js坐标，用于后续转换
+                
+                // 对每个角点进行射线检测
+                for (let pixelPoint of pixelPoints) {
+                    try {
+                        // 检查pixelPoint是否有效
+                        if (!pixelPoint || typeof pixelPoint.x === 'undefined' || typeof pixelPoint.y === 'undefined') {
+                            console.warn('[Cesium JS Warning] 无效的角点数据，跳过:', pixelPoint);
+                            cornerPoints3D.push({
+                                longitude: 0.0,
+                                latitude: 0.0,
+                                height: 0.0
+                            });
+                            continue;
+                        }
+                        
+                        // 1. 将屏幕坐标转换为归一化设备坐标（NDC）
+                        // Three.js的Raycaster需要NDC坐标，范围是[-1, 1]
+                        const ndcX = (pixelPoint.x / imageWidth) * 2 - 1;
+                        const ndcY = 1 - (pixelPoint.y / imageHeight) * 2; // Y轴翻转
+                        
+                        // 2. 使用Three.js的Raycaster设置射线
+                        threeRaycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), threeCamera);
+                        
+                        // 3. 获取射线的起点和方向
+                        const ray = threeRaycaster.ray;
+                        
+                        // 4. 计算射线与XZ平面的交点
+                        const intersectionPoint = new THREE.Vector3();
+                        const result = ray.intersectPlane(xzPlane, intersectionPoint);
+                        
+                        if (result) {
+                            // 成功计算到交点，存储在Three.js坐标系中
+                            cornerPoints3DThree.push(intersectionPoint.clone());
+                            
+                            // 5. 将Three.js世界坐标转换为Cesium坐标（可选，主要用于兼容）
+                            // 注意：Three.js坐标是主要结果，Cesium坐标只是备用
+                            
+                            // 尝试将Three.js坐标转换为Cesium ECEF坐标
+                            // Three.js坐标可能已经是ECEF坐标，或者需要转换
+                            try {
+                                // 将Three.js坐标视为ECEF坐标（如果场景使用ECEF坐标系）
+                                const ecefPoint = new Cesium.Cartesian3(
+                                    intersectionPoint.x,
+                                    intersectionPoint.y,
+                                    intersectionPoint.z
+                                );
+                                
+                                // 转换为地理坐标
+                                const cartographic = Cesium.Cartographic.fromCartesian(ecefPoint);
+                                
+                                // 检查坐标是否有效（经纬度在合理范围内）
+                                if (isFinite(cartographic.longitude) && isFinite(cartographic.latitude) &&
+                                    cartographic.longitude >= -Math.PI && cartographic.longitude <= Math.PI &&
+                                    cartographic.latitude >= -Math.PI/2 && cartographic.latitude <= Math.PI/2) {
+                                    cornerPoints3D.push({
+                                        longitude: cartographic.longitude,
+                                        latitude: cartographic.latitude,
+                                        height: cartographic.height
+                                    });
+                                } else {
+                                    // 如果直接转换失败，尝试使用Cesium相机射线
+                                    const cesiumRay = cesiumViewer.camera.getPickRay(
+                                        new Cesium.Cartesian2(pixelPoint.x, pixelPoint.y)
+                                    );
+                                    
+                                    if (cesiumRay) {
+                                        const cesiumIntersection = cesiumViewer.scene.globe.pick(cesiumRay, cesiumViewer.scene);
+                                        if (cesiumIntersection) {
+                                            const cartographic2 = Cesium.Cartographic.fromCartesian(cesiumIntersection);
+                                            cornerPoints3D.push({
+                                                longitude: cartographic2.longitude,
+                                                latitude: cartographic2.latitude,
+                                                height: cartographic2.height
+                                            });
+                                        } else {
+                                            // 使用椭球面求交
+                                            const ellipsoid = cesiumViewer.scene.globe.ellipsoid;
+                                            const intersectionResult = Cesium.IntersectionTests.rayEllipsoid(cesiumRay, ellipsoid);
+                                            if (intersectionResult) {
+                                                const intersectionPoint2 = intersectionResult.start;
+                                                const cartographic3 = Cesium.Cartographic.fromCartesian(intersectionPoint2);
+                                                cornerPoints3D.push({
+                                                    longitude: cartographic3.longitude,
+                                                    latitude: cartographic3.latitude,
+                                                    height: 0.0
+                                                });
+                                            } else {
+                                                // Cesium坐标计算失败，但不影响Three.js坐标的使用
+                                                // Three.js坐标是主要结果，Cesium坐标只是备用
+                                                cornerPoints3D.push({
+                                                    longitude: 0.0,
+                                                    latitude: 0.0,
+                                                    height: 0.0
+                                                });
+                                            }
+                                        }
+                                    } else {
+                                        cornerPoints3D.push({
+                                            longitude: 0.0,
+                                            latitude: 0.0,
+                                            height: 0.0
+                                        });
+                                    }
+                                }
+                            } catch (e) {
+                                // Three.js到Cesium坐标转换失败，使用默认值
+                                // 这不影响Three.js坐标的使用（Three.js坐标是主要结果）
+                                cornerPoints3D.push({
+                                    longitude: 0.0,
+                                    latitude: 0.0,
+                                    height: 0.0
+                                });
+                            }
+                        } else {
+                            // 射线与平面平行或不相交
+                            console.warn('[Cesium JS Warning] 射线与XZ平面不相交，使用默认值');
+                            cornerPoints3D.push({
+                                longitude: 0.0,
+                                latitude: 0.0,
+                                height: 0.0
+                            });
+                        }
+                    } catch (error) {
+                        console.error('[Cesium JS Error] 处理角点时出错:', error);
+                        cornerPoints3D.push({
+                            longitude: 0.0,
+                            latitude: 0.0,
+                            height: 0.0
+                        });
+                    }
+                }
+                
+                // 输出Three.js坐标用于调试
+                if (cornerPoints3DThree.length > 0) {
+                    console.log('[Cesium JS Info] 计算得到的Three.js坐标（XZ平面）:');
+                    cornerPoints3DThree.forEach((pt, idx) => {
+                        console.log(`  角点${idx + 1}: (${pt.x.toFixed(2)}, ${pt.y.toFixed(2)}, ${pt.z.toFixed(2)})`);
+                    });
+                    
+                    // 可视化角点和射线
+                    visualizeCornerPointsAndRays(cornerPoints3DThree, threeCamera, pixelPoints, imageWidth, imageHeight);
+                }
+                
+                // 发送结果回Python（包含Three.js坐标和Cesium坐标）
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'cornerPoints3DCalculated',
+                        data: {
+                            cornerPoints: cornerPoints3D,
+                            cornerPointsThree: cornerPoints3DThree.map(pt => ({
+                                x: pt.x,
+                                y: pt.y,
+                                z: pt.z
+                            }))
+                        }
+                    }));
+                }
+            } catch (error) {
+                console.error('[Cesium JS Error] 计算角点3D坐标失败:', error);
+                // 出错时使用备用方法
+                calculateCornerPoints3DWithPlane(data);
+            }
+        }
+        
+        // 计算分割轮廓的3D坐标（将2D轮廓点约束到XZ平面上）
+        function calculateContourPoints3D(data) {
+            try {
+                if (!cesiumViewer || !cesiumViewer.scene) {
+                    console.error('[Cesium JS Error] Cesium viewer未初始化');
+                    return;
+                }
+                
+                const imageWidth = data.imageWidth || cesiumViewer.scene.canvas.width;
+                const imageHeight = data.imageHeight || cesiumViewer.scene.canvas.height;
+                const contourPoints = data.contourPoints || []; // 轮廓点数组，每个轮廓是一个点数组
+                const contourId = data.contourId || 0; // 轮廓ID，用于区分不同的分割结果
+                
+                if (!contourPoints || contourPoints.length === 0) {
+                    console.warn('[Cesium JS Warning] 没有轮廓点数据');
+                    return;
+                }
+                
+                // 获取第一个加载的splat viewer和mesh
+                let splatViewer = null;
+                let splatMesh = null;
+                let threeCamera = null;
+                
+                for (let layer of gaussianSplatLayers) {
+                    if (layer.splatViewer && layer.ready) {
+                        splatViewer = layer.splatViewer;
+                        splatMesh = splatViewer.getSplatMesh();
+                        threeCamera = splatViewer.camera;
+                        if (splatMesh && threeCamera) break;
+                    }
+                }
+                
+                if (!threeCamera) {
+                    console.warn('[Cesium JS Warning] 未找到可用的THREE.js相机');
+                    return;
+                }
+                
+                // 计算地面高度（XZ平面的Y坐标）- 使用和角点相同的方法
+                let groundY = 0.0;
+                if (modelBoundingSphere && modelBoundingSphere.center && modelBoundingSphere.radius) {
+                    groundY = modelBoundingSphere.center[1] - modelBoundingSphere.radius;
+                } else if (splatMesh) {
+                    try {
+                        if (splatMesh.geometry && !splatMesh.geometry.boundingBox) {
+                            splatMesh.geometry.computeBoundingBox();
+                        }
+                        if (splatMesh.geometry && splatMesh.geometry.boundingBox) {
+                            const box = splatMesh.geometry.boundingBox;
+                            const minWorld = new THREE.Vector3(box.min.x, box.min.y, box.min.z);
+                            const maxWorld = new THREE.Vector3(box.max.x, box.max.y, box.max.z);
+                            splatMesh.localToWorld(minWorld);
+                            splatMesh.localToWorld(maxWorld);
+                            groundY = Math.min(minWorld.y, maxWorld.y);
+                        }
+                    } catch (e) {
+                        console.warn('[Cesium JS Warning] 无法从mesh获取地面高度，使用默认值0:', e);
+                    }
+                }
+                
+                // 创建XZ平面
+                const xzPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -groundY);
+                
+                // 创建Three.js的Raycaster
+                const threeRaycaster = new THREE.Raycaster();
+                const allContourPoints3D = []; // 存储所有轮廓的3D点
+                
+                // 处理每个轮廓
+                contourPoints.forEach((contour, contourIdx) => {
+                    if (!contour || contour.length < 3) {
+                        console.warn(`[Cesium JS Warning] 轮廓${contourIdx}点数不足，跳过`);
+                        return;
+                    }
+                    
+                    const contour3D = []; // 当前轮廓的3D点
+                    
+                    // 对轮廓中的每个点进行射线检测
+                    contour.forEach((pixelPoint, pointIdx) => {
+                        try {
+                            if (!pixelPoint || typeof pixelPoint.x === 'undefined' || typeof pixelPoint.y === 'undefined') {
+                                return;
+                            }
+                            
+                            // 将屏幕坐标转换为归一化设备坐标（NDC）
+                            const ndcX = (pixelPoint.x / imageWidth) * 2 - 1;
+                            const ndcY = 1 - (pixelPoint.y / imageHeight) * 2; // Y轴翻转
+                            
+                            // 使用Three.js的Raycaster设置射线
+                            threeRaycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), threeCamera);
+                            
+                            // 获取射线
+                            const ray = threeRaycaster.ray;
+                            
+                            // 计算射线与XZ平面的交点
+                            const intersectionPoint = new THREE.Vector3();
+                            const result = ray.intersectPlane(xzPlane, intersectionPoint);
+                            
+                            if (result) {
+                                contour3D.push(intersectionPoint.clone());
+                            }
+                        } catch (error) {
+                            console.warn(`[Cesium JS Warning] 处理轮廓${contourIdx}的点${pointIdx}时出错:`, error);
+                        }
+                    });
+                    
+                    if (contour3D.length > 0) {
+                        allContourPoints3D.push(contour3D);
+                    }
+                });
+                
+                console.log(`[Cesium JS Info] 成功转换${allContourPoints3D.length}个轮廓到3D坐标`);
+                
+                // 可视化轮廓线
+                visualizeContours3D(allContourPoints3D, contourId);
+                
+                // 发送结果回Python
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'contourPoints3DCalculated',
+                        data: {
+                            contourId: contourId,
+                            contours3D: allContourPoints3D.map(contour => 
+                                contour.map(pt => ({ x: pt.x, y: pt.y, z: pt.z }))
+                            )
+                        }
+                    }));
+                }
+            } catch (error) {
+                console.error('[Cesium JS Error] 计算轮廓3D坐标失败:', error);
+            }
+        }
+        
+        // 可视化分割轮廓线（在3D场景中）
+        function visualizeContours3D(contours3D, contourId) {
+            try {
+                if (!cesiumViewer || !cesiumViewer.scene) {
+                    console.error('[Cesium JS Error] Cesium viewer未初始化');
+                    return;
+                }
+                
+                // 清除之前的轮廓可视化
+                clearContourVisualization(contourId);
+                
+                // 为每个轮廓创建可视化
+                contours3D.forEach((contour, idx) => {
+                    if (contour.length < 3) {
+                        return;
+                    }
+                    
+                    // 将Three.js坐标转换为Cesium地理坐标
+                    const positions = [];
+                    contour.forEach(pt => {
+                        try {
+                            const ecefPoint = new Cesium.Cartesian3(pt.x, pt.y, pt.z);
+                            const cartographic = Cesium.Cartographic.fromCartesian(ecefPoint);
+                            
+                            if (isFinite(cartographic.longitude) && isFinite(cartographic.latitude)) {
+                                positions.push(Cesium.Cartesian3.fromRadians(
+                                    cartographic.longitude,
+                                    cartographic.latitude,
+                                    cartographic.height
+                                ));
+                            }
+                        } catch (e) {
+                            // 忽略转换失败的点
+                        }
+                    });
+                    
+                    // 闭合轮廓（添加第一个点到最后）
+                    if (positions.length > 0) {
+                        positions.push(positions[0].clone());
+                        
+                        // 在Cesium中绘制轮廓线
+                        const contourEntity = cesiumViewer.entities.add({
+                            name: `Contour_${contourId}_${idx}`,
+                            polyline: {
+                                positions: positions,
+                                width: 3,
+                                material: Cesium.Color.MAGENTA.withAlpha(0.8), // 使用洋红色区分轮廓
+                                clampToGround: true,
+                                heightReference: Cesium.HeightReference.CLAMP_TO_GROUND,
+                                arcType: Cesium.ArcType.GEODESIC
+                            }
+                        });
+                        
+                        if (!window.contourVisualizationEntities) {
+                            window.contourVisualizationEntities = {};
+                        }
+                        if (!window.contourVisualizationEntities[contourId]) {
+                            window.contourVisualizationEntities[contourId] = [];
+                        }
+                        window.contourVisualizationEntities[contourId].push(contourEntity);
+                    }
+                });
+                
+                // 在Three.js中也绘制轮廓线（用于更精确的显示）
+                visualizeContoursInThreeJS(contours3D, contourId);
+                
+                console.log(`[Cesium JS Info] 已可视化${contours3D.length}个轮廓`);
+            } catch (error) {
+                console.error('[Cesium JS Error] 可视化轮廓失败:', error);
+            }
+        }
+        
+        // 在Three.js中绘制轮廓线
+        function visualizeContoursInThreeJS(contours3D, contourId) {
+            try {
+                // 获取scene
+                let scene = threeScene;
+                if (!scene) {
+                    for (let layer of gaussianSplatLayers) {
+                        if (layer.splatViewer && layer.ready && layer.scene) {
+                            scene = layer.scene;
+                            break;
+                        }
+                    }
+                }
+                
+                if (!scene) {
+                    console.warn('[Cesium JS Warning] 无法找到可用的Three.js scene');
+                    return;
+                }
+                
+                // 清除之前的轮廓线
+                if (window.contourLines && window.contourLines[contourId]) {
+                    window.contourLines[contourId].forEach(line => {
+                        scene.remove(line);
+                        if (line.geometry) line.geometry.dispose();
+                        if (line.material) line.material.dispose();
+                    });
+                }
+                
+                if (!window.contourLines) {
+                    window.contourLines = {};
+                }
+                window.contourLines[contourId] = [];
+                
+                // 为每个轮廓创建线条
+                contours3D.forEach((contour, idx) => {
+                    if (contour.length < 3) {
+                        return;
+                    }
+                    
+                    // 闭合轮廓
+                    const closedContour = [...contour, contour[0]];
+                    
+                    const geometry = new THREE.BufferGeometry().setFromPoints(closedContour);
+                    const material = new THREE.LineBasicMaterial({
+                        color: 0xff00ff, // 洋红色
+                        linewidth: 2,
+                        transparent: true,
+                        opacity: 0.8
+                    });
+                    
+                    const line = new THREE.Line(geometry, material);
+                    scene.add(line);
+                    window.contourLines[contourId].push(line);
+                });
+                
+                console.log(`[Cesium JS Info] 已在Three.js中绘制${contours3D.length}个轮廓`);
+            } catch (error) {
+                console.error('[Cesium JS Error] 在Three.js中绘制轮廓失败:', error);
+            }
+        }
+        
+        // 清除轮廓可视化
+        function clearContourVisualization(contourId) {
+            try {
+                // 清除Cesium实体
+                if (window.contourVisualizationEntities && window.contourVisualizationEntities[contourId]) {
+                    window.contourVisualizationEntities[contourId].forEach(entity => {
+                        cesiumViewer.entities.remove(entity);
+                    });
+                    delete window.contourVisualizationEntities[contourId];
+                }
+                
+                // 清除Three.js线条
+                if (window.contourLines && window.contourLines[contourId]) {
+                    window.contourLines[contourId].forEach(line => {
+                        // 尝试从所有可能的scene中移除
+                        if (threeScene) threeScene.remove(line);
+                        for (let layer of gaussianSplatLayers) {
+                            if (layer.scene) {
+                                try {
+                                    layer.scene.remove(line);
+                                } catch (e) {}
+                            }
+                        }
+                        if (line.geometry) line.geometry.dispose();
+                        if (line.material) line.material.dispose();
+                    });
+                    delete window.contourLines[contourId];
+                }
+            } catch (error) {
+                console.error('[Cesium JS Error] 清除轮廓可视化失败:', error);
+            }
+        }
+        
+        // 使用射线与Cesium地球表面求交的方法（备用方法，也实现贴地效果）
+        function calculateCornerPoints3DWithPlane(data) {
+            try {
+                const imageWidth = data.imageWidth || cesiumViewer.scene.canvas.width;
+                const imageHeight = data.imageHeight || cesiumViewer.scene.canvas.height;
+                const pixelPoints = data.pixelPoints || [];
+                
+                const cornerPoints3D = [];
+                
+                // 直接使用Cesium相机与地球表面求交（贴地效果）
+                for (let pixelPoint of pixelPoints) {
+                    // 检查pixelPoint是否有效
+                    if (!pixelPoint || typeof pixelPoint.x === 'undefined' || typeof pixelPoint.y === 'undefined') {
+                        console.warn('[Cesium JS Warning] 无效的角点数据，跳过:', pixelPoint);
+                        cornerPoints3D.push({
+                            longitude: 0.0,
+                            latitude: 0.0,
+                            height: 0.0
+                        });
+                        continue;
+                    }
+                    
+                    const ray = cesiumViewer.camera.getPickRay(new Cesium.Cartesian2(pixelPoint.x, pixelPoint.y));
+                    if (ray) {
+                        // 与地球椭球面求交（贴地效果）
+                        const intersection = cesiumViewer.scene.globe.pick(ray, cesiumViewer.scene);
+                        if (intersection) {
+                            const cartographic = Cesium.Cartographic.fromCartesian(intersection);
+                            cornerPoints3D.push({
+                                longitude: cartographic.longitude,
+                                latitude: cartographic.latitude,
+                                height: cartographic.height
+                            });
+                        } else {
+                            // 如果没有交点，使用椭球面求交（备用方法）
+                            const ellipsoid = cesiumViewer.scene.globe.ellipsoid;
+                            const intersectionResult = Cesium.IntersectionTests.rayEllipsoid(ray, ellipsoid);
+                            if (intersectionResult) {
+                                // intersectionResult 包含 start 和 stop 两个交点，使用较近的点（start）
+                                const intersectionPoint = intersectionResult.start;
+                                const cartographic = Cesium.Cartographic.fromCartesian(intersectionPoint);
+                                cornerPoints3D.push({
+                                    longitude: cartographic.longitude,
+                                    latitude: cartographic.latitude,
+                                    height: 0.0  // 椭球面高度为0
+                                });
+                            } else {
+                                cornerPoints3D.push({
+                                    longitude: 0.0,
+                                    latitude: 0.0,
+                                    height: 0.0
+                                });
+                            }
+                        }
+                    } else {
+                        cornerPoints3D.push({
+                            longitude: 0.0,
+                            latitude: 0.0,
+                            height: 0.0
+                        });
+                    }
+                }
+                
+                // 发送结果回Python
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'cornerPoints3DCalculated',
+                        data: {
+                            cornerPoints: cornerPoints3D
+                        }
+                    }));
+                }
+            } catch (error) {
+                console.error('[Cesium JS Error] 计算角点3D坐标（平面方法）失败:', error);
+            }
+        }
+        
+        // 获取相机矩阵
+        function getCameraMatrices() {
+            try {
+                if (!cesiumViewer || !cesiumViewer.scene) {
+                    console.error('[Cesium JS Error] Cesium viewer未初始化');
+                    return;
+                }
+                
+                // 获取第一个splat viewer的THREE.js相机
+                let threeCamera = null;
+                for (let layer of gaussianSplatLayers) {
+                    if (layer.splatViewer && layer.ready) {
+                        threeCamera = layer.splatViewer.camera;
+                        if (threeCamera) break;
+                    }
+                }
+                
+                if (!threeCamera) {
+                    console.error('[Cesium JS Error] 未找到THREE.js相机');
+                    return;
+                }
+                
+                // 获取视图矩阵和投影矩阵
+                const viewMatrix = threeCamera.matrixWorldInverse.clone();
+                const projMatrix = threeCamera.projectionMatrix.clone();
+                
+                // 转换为数组格式
+                const viewArray = [];
+                const projArray = [];
+                
+                for (let i = 0; i < 16; i++) {
+                    viewArray.push(viewMatrix.elements[i]);
+                    projArray.push(projMatrix.elements[i]);
+                }
+                
+                // 发送结果回Python
+                if (pyBridge && pyBridge.receiveMessage) {
+                    pyBridge.receiveMessage(JSON.stringify({
+                        type: 'cameraMatricesReceived',
+                        data: {
+                            viewMatrix: viewArray,
+                            projMatrix: projArray
+                        }
+                    }));
+                }
+            } catch (error) {
+                console.error('[Cesium JS Error] 获取相机矩阵失败:', error);
+            }
         }
 
         function flyToModel() {

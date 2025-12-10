@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAM3 图像分割与可视化</title>
+    <style>
+        :root {
+            --primary-color: #3b82f6;
+            --bg-color: #f3f4f6;
+            --card-bg: #ffffff;
+            --text-color: #1f2937;
+            --border-color: #e5e7eb;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+        }
+
+        header {
+            background-color: var(--card-bg);
+            padding: 1rem 2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo {
+            font-size: 1.25rem;
+            font-weight: bold;
+            color: var(--primary-color);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .status-badge {
+            background-color: #d1fae5;
+            color: #065f46;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 500;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 300px 1fr;
+            gap: 2rem;
+            padding: 2rem;
+            max-width: 1400px;
+            margin: 0 auto;
+            height: calc(100vh - 80px);
+        }
+
+        .sidebar {
+            background-color: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+
+        .main-content {
+            background-color: var(--card-bg);
+            padding: 1.5rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        h2 {
+            font-size: 1.1rem;
+            margin: 0 0 1rem 0;
+            font-weight: 600;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        label {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #4b5563;
+        }
+
+        input[type="text"], input[type="file"] {
+            padding: 0.5rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+        }
+
+        .upload-area {
+            border: 2px dashed var(--border-color);
+            border-radius: 0.5rem;
+            padding: 2rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            background-color: #f9fafb;
+        }
+
+        .upload-area:hover {
+            border-color: var(--primary-color);
+            background-color: #eff6ff;
+        }
+
+        .upload-icon {
+            font-size: 2rem;
+            color: #9ca3af;
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-text {
+            color: #6b7280;
+            font-size: 0.875rem;
+        }
+
+        .range-container {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        input[type="range"] {
+            flex: 1;
+        }
+
+        .range-value {
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: var(--primary-color);
+            min-width: 2rem;
+        }
+
+        .btn {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 0.75rem;
+            border-radius: 0.375rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .btn:hover {
+            background-color: #2563eb;
+        }
+
+        .btn:disabled {
+            background-color: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .stats {
+            margin-top: auto;
+            border-top: 1px solid var(--border-color);
+            padding-top: 1rem;
+        }
+
+        .stat-item {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+        }
+
+        .stat-label {
+            color: #6b7280;
+        }
+
+        .stat-value {
+            font-weight: 600;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab {
+            padding: 0.5rem 1rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #6b7280;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab.active {
+            color: var(--primary-color);
+            border-bottom-color: var(--primary-color);
+        }
+
+        .canvas-container {
+            flex: 1;
+            position: relative;
+            background-color: #f9fafb;
+            border-radius: 0.5rem;
+            overflow: auto;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+
+        canvas {
+            max-width: 100%;
+            max-height: 100%;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        #loadingOverlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(255, 255, 255, 0.8);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 10;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">
+            🎯 SAM3 图像分割与可视化
+        </div>
+        <div class="status-badge">● 服务在线</div>
+    </header>
+
+    <div class="container">
+        <aside class="sidebar">
+            <h2>控制面板</h2>
+            
+            <div class="form-group">
+                <label>1. 上传图片</label>
+                <input type="file" id="fileInput" accept="image/*" style="display: none">
+                <div class="upload-area" onclick="document.getElementById('fileInput').click()">
+                    <div class="upload-icon">☁️</div>
+                    <div class="upload-text" id="fileName">点击或拖拽图片到这里</div>
+                </div>
+            </div>
+
+            <div class="form-group">
+                <label>2. 提示词 (Prompt)</label>
+                <input type="text" id="promptInput" placeholder="例如: building, car, person" value="building">
+            </div>
+
+            <div class="form-group">
+                <label>3. 置信度阈值</label>
+                <div class="range-container">
+                    <input type="range" id="thresholdInput" min="0" max="1" step="0.05" value="0.5">
+                    <span class="range-value" id="thresholdValue">0.5</span>
+                </div>
+            </div>
+
+            <button class="btn" id="segmentBtn" onclick="runSegmentation()">
+                🚀 开始分割
+            </button>
+
+            <div class="stats" id="statsPanel" style="display: none;">
+                <div class="stat-item">
+                    <span class="stat-label">检测对象</span>
+                    <span class="stat-value" id="objCount">0</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">处理耗时</span>
+                    <span class="stat-value" id="procTime">0ms</span>
+                </div>
+                <div class="stat-item">
+                    <span class="stat-label">平均置信度</span>
+                    <span class="stat-value" id="avgScore">0%</span>
+                </div>
+            </div>
+        </aside>
+
+        <main class="main-content">
+            <div class="tabs">
+                <div class="tab active" onclick="setMode('overlay')">矢量叠加</div>
+                <div class="tab" onclick="setMode('original')">原始图片</div>
+                <div class="tab" onclick="setMode('mask')">仅Mask</div>
+            </div>
+
+            <div class="canvas-container">
+                <canvas id="resultCanvas"></canvas>
+                <div id="loadingOverlay">
+                    <div class="spinner"></div>
+                    <p style="margin-top: 10px; color: #666;">正在处理中...</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+        let currentImage = null;
+        let currentGeoJSON = null;
+        let viewMode = 'overlay'; // overlay, original, mask
+
+        const fileInput = document.getElementById('fileInput');
+        const fileNameDiv = document.getElementById('fileName');
+        const thresholdInput = document.getElementById('thresholdInput');
+        const thresholdValue = document.getElementById('thresholdValue');
+        const canvas = document.getElementById('resultCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // Initial setup
+        thresholdInput.addEventListener('input', (e) => {
+            thresholdValue.textContent = e.target.value;
+        });
+
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files && e.target.files[0]) {
+                const file = e.target.files[0];
+                fileNameDiv.textContent = file.name;
+                
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        currentImage = img;
+                        currentGeoJSON = null; // Reset results
+                        document.getElementById('statsPanel').style.display = 'none';
+                        renderCanvas();
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        function setMode(mode) {
+            viewMode = mode;
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            // Find tab by text content is tricky, simplified selector
+            const tabs = document.querySelectorAll('.tab');
+            if (mode === 'overlay') tabs[0].classList.add('active');
+            if (mode === 'original') tabs[1].classList.add('active');
+            if (mode === 'mask') tabs[2].classList.add('active');
+            renderCanvas();
+        }
+
+        function renderCanvas() {
+            if (!currentImage) return;
+
+            // Resize canvas to match image
+            canvas.width = currentImage.width;
+            canvas.height = currentImage.height;
+
+            // Clear
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (viewMode === 'original' || viewMode === 'overlay') {
+                ctx.drawImage(currentImage, 0, 0);
+            } else if (viewMode === 'mask') {
+                // Draw black background for mask only
+                ctx.fillStyle = 'black';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            if ((viewMode === 'overlay' || viewMode === 'mask') && currentGeoJSON) {
+                drawGeoJSON(currentGeoJSON);
+            }
+        }
+
+        function drawGeoJSON(geojson) {
+            if (!geojson || !geojson.features) return;
+
+            // Generate colors for features
+            geojson.features.forEach((feature, index) => {
+                const coords = feature.geometry.coordinates[0]; // Assuming Polygon with one ring
+                
+                ctx.beginPath();
+                ctx.moveTo(coords[0][0], coords[0][1]);
+                for (let i = 1; i < coords.length; i++) {
+                    ctx.lineTo(coords[i][0], coords[i][1]);
+                }
+                ctx.closePath();
+
+                // Style
+                const hue = (index * 137.508) % 360; // Golden angle approximation for distinct colors
+                ctx.fillStyle = `hsla(${hue}, 70%, 50%, 0.4)`;
+                ctx.strokeStyle = `hsla(${hue}, 100%, 50%, 1.0)`;
+                ctx.lineWidth = 2;
+
+                ctx.fill();
+                ctx.stroke();
+            });
+        }
+
+        async function runSegmentation() {
+            if (!currentImage || !fileInput.files[0]) {
+                alert("请先上传图片");
+                return;
+            }
+
+            const prompt = document.getElementById('promptInput').value;
+            if (!prompt) {
+                alert("请输入提示词");
+                return;
+            }
+
+            const threshold = thresholdInput.value;
+            
+            // Show loading
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            document.getElementById('segmentBtn').disabled = true;
+
+            const startTime = performance.now();
+
+            const formData = new FormData();
+            formData.append('image', fileInput.files[0]);
+            formData.append('prompt', prompt);
+            formData.append('threshold', threshold);
+
+            try {
+                const response = await fetch('/api/segment/file', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+                
+                if (data.success) {
+                    currentGeoJSON = data.geojson;
+                    
+                    // Update stats
+                    const endTime = performance.now();
+                    document.getElementById('statsPanel').style.display = 'block';
+                    document.getElementById('objCount').textContent = currentGeoJSON.features.length;
+                    document.getElementById('procTime').textContent = Math.round(endTime - startTime) + 'ms';
+                    
+                    if (currentGeoJSON.features.length > 0) {
+                        const totalScore = currentGeoJSON.features.reduce((acc, f) => acc + (f.properties.score || 0), 0);
+                        const avg = (totalScore / currentGeoJSON.features.length * 100).toFixed(1);
+                        document.getElementById('avgScore').textContent = avg + '%';
+                    } else {
+                         document.getElementById('avgScore').textContent = '0%';
+                    }
+
+                    setMode('overlay'); // Auto switch to overlay view
+                } else {
+                    alert('分割失败: ' + data.summary);
+                }
+            } catch (error) {
+                console.error(error);
+                alert('网络错误或服务器异常');
+            } finally {
+                document.getElementById('loadingOverlay').style.display = 'none';
+                document.getElementById('segmentBtn').disabled = false;
+            }
+        }
+        
+        // Drag and drop support
+        const dropZone = document.querySelector('.upload-area');
+        
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.backgroundColor = '#eff6ff';
+            dropZone.style.borderColor = '#3b82f6';
+        });
+
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.style.backgroundColor = '#f9fafb';
+            dropZone.style.borderColor = '#e5e7eb';
+        });
+
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.backgroundColor = '#f9fafb';
+            dropZone.style.borderColor = '#e5e7eb';
+            
+            if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                fileInput.files = e.dataTransfer.files;
+                // Trigger change event manually
+                const event = new Event('change');
+                fileInput.dispatchEvent(event);
+            }
+        });
+
+    </script>
+</body>
+</html>
