@@ -179,7 +179,7 @@ class ScreenshotPreviewWidget(QWidget):
             self.preview_label.setPixmap(scaled_pixmap)
     
     def _draw_segmentation_mask(self, painter: QPainter, image_width: int, image_height: int):
-        """在图像上绘制分割mask"""
+        """在图像上绘制分割mask，保留曲线细节"""
         if self.segmentation_mask is None:
             return
         
@@ -211,16 +211,25 @@ class ScreenshotPreviewWidget(QWidget):
                 painter.setBrush(brush)
                 painter.setPen(Qt.NoPen)
                 
-                # 找到该标签的轮廓
+                # 找到该标签的轮廓 - 使用 CHAIN_APPROX_NONE 保留所有轮廓点
                 mask_label = (mask_resized == label).astype(np.uint8)
-                contours, _ = cv2.findContours(mask_label, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                contours, _ = cv2.findContours(mask_label, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
                 
                 # 绘制每个轮廓
                 for contour in contours:
                     if len(contour) < 3:
                         continue
+                    
+                    # 使用极小的epsilon进行轮廓近似，保留曲线细节
+                    epsilon = 0.001 * cv2.arcLength(contour, True)
+                    smoothed_contour = cv2.approxPolyDP(contour, epsilon, True)
+                    
+                    # 如果近似后点数太少，使用原始轮廓
+                    if len(smoothed_contour) < 10:
+                        smoothed_contour = contour
+                    
                     # 转换为QPolygon
-                    points = [QPoint(int(p[0][0]), int(p[0][1])) for p in contour]
+                    points = [QPoint(int(p[0][0]), int(p[0][1])) for p in smoothed_contour]
                     polygon = QPolygon(points)
                     painter.drawPolygon(polygon)
         except Exception as e:
@@ -1136,7 +1145,7 @@ class GSScreenshotSplitter:
         return file_path if success else ""
     
     def _draw_segmentation_mask_on_pixmap(self, painter: QPainter, mask: np.ndarray, image_width: int, image_height: int):
-        """在pixmap上绘制分割mask"""
+        """在pixmap上绘制分割mask，保留曲线细节"""
         if mask is None:
             return
         
@@ -1168,16 +1177,25 @@ class GSScreenshotSplitter:
                 painter.setBrush(brush)
                 painter.setPen(Qt.NoPen)
                 
-                # 找到该标签的轮廓
+                # 找到该标签的轮廓 - 使用 CHAIN_APPROX_NONE 保留所有轮廓点
                 mask_label = (mask_resized == label).astype(np.uint8)
-                contours, _ = cv2.findContours(mask_label, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                contours, _ = cv2.findContours(mask_label, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
                 
                 # 绘制每个轮廓
                 for contour in contours:
                     if len(contour) < 3:
                         continue
+                    
+                    # 使用极小的epsilon进行轮廓近似，保留曲线细节
+                    epsilon = 0.001 * cv2.arcLength(contour, True)
+                    smoothed_contour = cv2.approxPolyDP(contour, epsilon, True)
+                    
+                    # 如果近似后点数太少，使用原始轮廓
+                    if len(smoothed_contour) < 10:
+                        smoothed_contour = contour
+                    
                     # 转换为QPolygon
-                    points = [QPoint(int(p[0][0]), int(p[0][1])) for p in contour]
+                    points = [QPoint(int(p[0][0]), int(p[0][1])) for p in smoothed_contour]
                     polygon = QPolygon(points)
                     painter.drawPolygon(polygon)
         except Exception as e:
@@ -1278,14 +1296,17 @@ class GSScreenshotSplitter:
             traceback.print_exc()
             return False
     
-    def _extract_contour_points(self, mask: np.ndarray, image_width: int, image_height: int) -> List[List[QPoint]]:
+    def _extract_contour_points(self, mask: np.ndarray, image_width: int, image_height: int, 
+                                  smooth: bool = True, epsilon_factor: float = 0.001) -> List[List[QPoint]]:
         """
-        从分割mask中提取轮廓点
+        从分割mask中提取轮廓点，保留曲线细节
         
         Args:
             mask: 分割mask（numpy数组）
             image_width: 图像宽度
             image_height: 图像高度
+            smooth: 是否对轮廓进行平滑处理
+            epsilon_factor: 轮廓近似的精度因子，值越小保留的细节越多（默认0.001）
             
         Returns:
             轮廓点列表，每个轮廓是一个QPoint列表
@@ -1308,14 +1329,29 @@ class GSScreenshotSplitter:
             for label in unique_labels:
                 # 找到该标签的轮廓
                 mask_label = (mask_resized == label).astype(np.uint8)
-                contours, _ = cv2.findContours(mask_label, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                # 使用 CHAIN_APPROX_NONE 保留所有轮廓点，不进行简化
+                contours, _ = cv2.findContours(mask_label, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
                 
                 # 转换每个轮廓为QPoint列表
                 for contour in contours:
                     if len(contour) < 3:
                         continue
+                    
+                    # 可选：对轮廓进行平滑处理
+                    if smooth:
+                        # 使用极小的epsilon值进行多边形近似，保留更多细节
+                        epsilon = epsilon_factor * cv2.arcLength(contour, True)
+                        smoothed_contour = cv2.approxPolyDP(contour, epsilon, True)
+                        
+                        # 如果近似后点数太少，使用原始轮廓
+                        if len(smoothed_contour) < 10:
+                            smoothed_contour = contour
+                    else:
+                        smoothed_contour = contour
+                    
                     # 转换为QPoint列表
-                    points = [QPoint(int(p[0][0]), int(p[0][1])) for p in contour]
+                    points = [QPoint(int(p[0][0]), int(p[0][1])) for p in smoothed_contour]
                     all_contours.append(points)
             
             return all_contours

@@ -216,6 +216,14 @@ except ImportError as e:
     GIS_AVAILABLE = False
     print(f"警告: GIS模块不可用: {e}")
 
+# Import Three.js Splat Viewer for segmentation
+try:
+    from threejs_splat_viewer import ThreeJSSplatViewer, SplatSplitterPanel, ThreeJSSplatSplitterTab
+    THREEJS_SPLITTER_AVAILABLE = True
+except ImportError as e:
+    THREEJS_SPLITTER_AVAILABLE = False
+    print(f"警告: Three.js分割视图模块不可用: {e}")
+
 # Import HTTP server
 try:
     from temp_http_server import start_global_server, stop_global_server, get_global_server
@@ -1575,7 +1583,7 @@ class GSSEGUI(QMainWindow):
     def init_ui(self):
         """初始化用户界面"""
         self.setWindowTitle("GSSE - Gaussian Splatting Semantic Editor")
-        self.setGeometry(100, 100, 1600, 1000)
+        self.setGeometry(120, 120, 1920, 1280)
         
         # 创建主窗口部件
         main_widget = QWidget()
@@ -1584,74 +1592,68 @@ class GSSEGUI(QMainWindow):
         # 主布局
         main_layout = QVBoxLayout(main_widget)
         main_layout.setContentsMargins(10, 10, 10, 0)
+        main_layout.setSpacing(0)
         
         # 创建菜单栏
         self.create_menu_bar()
         
-        # 创建水平分割器：左侧控制面板 + 右侧内容区
+        # 创建垂直分割器：上面是内容区，下面是日志栏
+        self.vertical_splitter = QSplitter(Qt.Vertical)
+        main_layout.addWidget(self.vertical_splitter)
+        
+        # 上部内容区：左侧显示区域 + 右侧控制面板
         self.main_splitter = QSplitter(Qt.Horizontal)
-        main_layout.addWidget(self.main_splitter)
         
-        # 左侧控制面板（可滚动）
-        self.left_scroll = QScrollArea()
-        self.left_scroll.setWidgetResizable(True)
-        self.left_scroll.setMinimumWidth(400)
-        self.left_widget = QWidget()
-        left_layout = QVBoxLayout(self.left_widget)
-        left_layout.setAlignment(Qt.AlignTop)
-        self.create_control_panel(left_layout)
-        self.left_scroll.setWidget(self.left_widget)
-        self.main_splitter.addWidget(self.left_scroll)
-        
-        # 右侧内容区：中间显示区域 + 右侧日志
-        right_splitter = QSplitter(Qt.Horizontal)
-        
-        # 中间显示区域
+        # 左侧显示区域
         display_widget = QWidget()
         display_layout = QVBoxLayout(display_widget)
         display_layout.setContentsMargins(0, 0, 0, 0)
         self.create_display_panel(display_layout)
-        right_splitter.addWidget(display_widget)
+        self.main_splitter.addWidget(display_widget)
         
-        # 右侧日志栏
+        # 右侧控制面板（可滚动）
+        self.right_scroll = QScrollArea()
+        self.right_scroll.setWidgetResizable(True)
+        self.right_scroll.setMinimumWidth(400)
+        self.right_widget = QWidget()
+        right_layout = QVBoxLayout(self.right_widget)
+        right_layout.setAlignment(Qt.AlignTop)
+        self.create_control_panel(right_layout)
+        self.right_scroll.setWidget(self.right_widget)
+        self.main_splitter.addWidget(self.right_scroll)
+        
+        self.vertical_splitter.addWidget(self.main_splitter)
+        
+        # 底部日志栏（可折叠）
         self.log_widget = QWidget()
         log_layout = QVBoxLayout(self.log_widget)
         log_layout.setContentsMargins(0, 0, 0, 0)
+        log_layout.setSpacing(0)
         self.create_log_panel(log_layout)
-        self.log_widget.setMinimumWidth(350)
-        right_splitter.addWidget(self.log_widget)
+        self.vertical_splitter.addWidget(self.log_widget)
         
-        self.main_splitter.addWidget(right_splitter)
-        
-        # 设置分割器比例
-        right_splitter.setSizes([800, 400])
+        # 默认折叠日志面板（只显示标题栏）
+        self.log_panel_collapsed = True
+        self.log_panel_expanded_height = 200  # 展开时的高度
         
         # 计算合适的边栏宽度
         # 强制更新布局以获取正确的尺寸提示
-        self.left_widget.updateGeometry()
-        self.left_scroll.updateGeometry()
+        self.right_widget.updateGeometry()
+        self.right_scroll.updateGeometry()
         
         # 获取控制面板的理想宽度（包括边距）
         # 添加一些额外的空间用于滚动条和边距（约20-30像素）
-        ideal_width = self.left_widget.sizeHint().width()
+        ideal_width = self.right_widget.sizeHint().width()
         if ideal_width <= 0:
-            ideal_width = self.left_widget.minimumSizeHint().width()
+            ideal_width = self.right_widget.minimumSizeHint().width()
         
-        # 设置合理的宽度范围：最小400，最大650
-        sidebar_width = max(400, min(650, ideal_width + 30))
-        self.left_scroll.setMinimumWidth(sidebar_width)
+        # 设置右侧控制面板的最小宽度
+        self.right_scroll.setMinimumWidth(350)
         
-        # 设置分割器初始大小
-        # 根据窗口初始大小调整，确保边栏能完全显示内容
-        window_width = self.width()
-        if window_width > 0:
-            right_width = window_width - sidebar_width - 50  # 50像素用于分割器和其他边距
-            if right_width < 600:
-                right_width = 600
-            self.main_splitter.setSizes([sidebar_width, right_width])
-        else:
-            # 如果窗口还未显示，使用默认值
-            self.main_splitter.setSizes([sidebar_width, 1200])
+        # 设置分割器初始大小 - 左侧视图占70%，右侧控制面板占30%
+        self.main_splitter.setStretchFactor(0, 7)  # 左侧显示区域
+        self.main_splitter.setStretchFactor(1, 3)  # 右侧控制面板
+        self.main_splitter.setSizes([1400, 400])
         
         # 创建状态栏
         self.create_status_bar()
@@ -1671,6 +1673,10 @@ class GSSEGUI(QMainWindow):
             self._sidebar_adjusted = True
             # 使用定时器延迟调整，确保布局已完成
             QTimer.singleShot(100, self._adjust_sidebar_width)
+            # 初始化日志面板为折叠状态
+            QTimer.singleShot(150, self._init_log_panel_collapsed)
+            # 初始化左右标签页联动状态
+            QTimer.singleShot(200, self._init_tab_linkage)
     
     def closeEvent(self, event):
         """窗口关闭事件"""
@@ -1704,55 +1710,60 @@ class GSSEGUI(QMainWindow):
     
     def _adjust_sidebar_width(self):
         """调整边栏宽度以适应内容"""
-        if not hasattr(self, 'left_widget') or not hasattr(self, 'main_splitter'):
+        if not hasattr(self, 'right_widget') or not hasattr(self, 'main_splitter'):
             return
         
         try:
-            # 强制更新布局
-            self.left_widget.updateGeometry()
-            self.left_widget.adjustSize()
-            
-            # 获取控制面板的理想宽度
-            ideal_width = self.left_widget.sizeHint().width()
-            if ideal_width <= 0:
-                ideal_width = self.left_widget.minimumSizeHint().width()
-            
-            # 如果还是无效，使用实际布局后的宽度
-            if ideal_width <= 0:
-                ideal_width = self.left_widget.width()
-            
-            # 添加额外的空间用于滚动条和边距
-            # 设置合理的宽度范围：最小400，最大650
-            sidebar_width = max(400, min(650, ideal_width + 30))
-            
-            # 更新分割器大小
-            current_sizes = self.main_splitter.sizes()
-            if len(current_sizes) >= 2:
-                window_width = self.width()
-                if window_width > 0:
-                    right_width = window_width - sidebar_width - 50  # 50像素用于分割器和其他边距
-                    if right_width < 600:
-                        right_width = 600
-                    self.main_splitter.setSizes([sidebar_width, right_width])
-                else:
-                    self.main_splitter.setSizes([sidebar_width, current_sizes[1]])
+            # 使用比例分配：左侧70%，右侧30%
+            window_width = self.width()
+            if window_width > 0:
+                left_width = int(window_width * 0.7)
+                right_width = window_width - left_width
+                # 确保右侧面板不会太窄
+                if right_width < 350:
+                    right_width = 350
+                    left_width = window_width - right_width
+                self.main_splitter.setSizes([left_width, right_width])
         except Exception as e:
             # 如果调整失败，使用默认值
             print(f"[DEBUG] 调整边栏宽度时出错: {e}", file=sys.stderr)
-
-    def toggle_left_panel(self):
-        """切换左侧控制面板可见性"""
+    
+    def _init_log_panel_collapsed(self):
+        """初始化日志面板为折叠状态"""
         try:
-            if hasattr(self, 'left_scroll') and self.left_scroll is not None:
-                self.left_scroll.setVisible(not self.left_scroll.isVisible())
+            if hasattr(self, 'vertical_splitter') and hasattr(self, 'log_panel_collapsed'):
+                # 确保日志面板处于折叠状态
+                if self.log_panel_collapsed:
+                    sizes = self.vertical_splitter.sizes()
+                    if len(sizes) >= 2:
+                        total = sum(sizes)
+                        collapsed_height = 42  # 折叠时只显示标题栏的高度
+                        self.vertical_splitter.setSizes([total - collapsed_height, collapsed_height])
         except Exception as e:
-            self.log(f"切换左侧面板失败: {e}", "warning")
+            print(f"[DEBUG] 初始化日志面板折叠状态时出错: {e}", file=sys.stderr)
+    
+    def _init_tab_linkage(self):
+        """初始化左右标签页联动状态"""
+        try:
+            # 根据当前左侧视图标签页设置右侧面板状态
+            if hasattr(self, 'display_tabs') and hasattr(self, 'control_tabs'):
+                current_index = self.display_tabs.currentIndex()
+                self.on_display_tab_changed(current_index)
+        except Exception as e:
+            print(f"[DEBUG] 初始化标签页联动状态时出错: {e}", file=sys.stderr)
+
+    def toggle_right_panel(self):
+        """切换右侧控制面板可见性"""
+        try:
+            if hasattr(self, 'right_scroll') and self.right_scroll is not None:
+                self.right_scroll.setVisible(not self.right_scroll.isVisible())
+        except Exception as e:
+            self.log(f"切换右侧面板失败: {e}", "warning")
 
     def toggle_log_panel(self):
-        """切换右侧日志面板可见性"""
+        """切换底部日志面板可见性"""
         try:
-            if hasattr(self, 'log_widget') and self.log_widget is not None:
-                self.log_widget.setVisible(not self.log_widget.isVisible())
+            self.toggle_log_collapse()
         except Exception as e:
             self.log(f"切换日志面板失败: {e}", "warning")
 
@@ -1780,6 +1791,7 @@ class GSSEGUI(QMainWindow):
         # 文件菜单
         file_menu = menubar.addMenu('文件(&F)')
         file_menu.addAction('加载模型(&O)', self.load_model, QKeySequence('Ctrl+O'))
+        file_menu.addAction('加载3DGS模型到3D渲染(&G)', self.load_3dgs_to_render, QKeySequence('Ctrl+G'))
         file_menu.addAction('加载原始图像目录(&I)', self.action_load_images)
         file_menu.addSeparator()
         file_menu.addAction('保存分割结果(&S)', self.save_results, QKeySequence('Ctrl+S'))
@@ -1818,8 +1830,8 @@ class GSSEGUI(QMainWindow):
         view_menu.addAction('显示3D模型', self.show_3d_model, QKeySequence('F7'))
         view_menu.addAction('停止3D查看器', self.stop_3d_viewer)
         view_menu.addSeparator()
-        view_menu.addAction('切换左侧控制面板', self.toggle_left_panel)
-        view_menu.addAction('切换右侧日志面板', self.toggle_log_panel)
+        view_menu.addAction('切换右侧控制面板', self.toggle_right_panel)
+        view_menu.addAction('切换底部日志面板', self.toggle_log_panel)
         view_menu.addSeparator()
         # 主题切换
         theme_menu = view_menu.addMenu('主题(&T)')
@@ -1834,7 +1846,7 @@ class GSSEGUI(QMainWindow):
     def create_control_panel(self, parent_layout):
         """创建左侧控制面板"""
         # 创建主标签页容器
-        control_tabs = QTabWidget()
+        self.control_tabs = QTabWidget()
         
         # ========== 标签页1: 模型训练 ==========
         training_tab = QWidget()
@@ -2152,7 +2164,7 @@ class GSSEGUI(QMainWindow):
         training_tab_layout.addWidget(workflow_group)
         
         training_tab_layout.addStretch()
-        control_tabs.addTab(training_tab, "模型训练")
+        self.control_tabs.addTab(training_tab, "模型训练")
         
         # ========== 标签页2: SAGS分割 ==========
         sags_tab = QWidget()
@@ -2471,7 +2483,7 @@ class GSSEGUI(QMainWindow):
         sags_tab_layout.addWidget(sags_workflow_group)
         
         sags_tab_layout.addStretch()
-        control_tabs.addTab(sags_tab, "SAGS分割")
+        self.control_tabs.addTab(sags_tab, "SAGS分割")
         
         # ========== 标签页3: SAGA分割 ==========
         saga_tab = QWidget()
@@ -2745,7 +2757,7 @@ class GSSEGUI(QMainWindow):
             saga_group.setLayout(saga_layout)
             saga_tab_layout.addWidget(saga_group)
             saga_tab_layout.addStretch()
-            control_tabs.addTab(saga_tab, "SAGA分割")
+            self.control_tabs.addTab(saga_tab, "SAGA分割")
         else:
             # 如果SAGA不可用，仍然创建标签页但显示提示信息
             no_saga_label = QLabel("SAGA模块不可用")
@@ -2753,7 +2765,7 @@ class GSSEGUI(QMainWindow):
             no_saga_label.setStyleSheet("color: #B0B0B0; font-size: 14px;")
             saga_tab_layout.addWidget(no_saga_label)
             saga_tab_layout.addStretch()
-            control_tabs.addTab(saga_tab, "SAGA分割")
+            self.control_tabs.addTab(saga_tab, "SAGA分割")
         
         # ========== 标签页4: 工具 ==========
         tools_tab = QWidget()
@@ -2809,7 +2821,7 @@ class GSSEGUI(QMainWindow):
         tools_tab_layout.addWidget(memory_group)
         
         tools_tab_layout.addStretch()
-        control_tabs.addTab(tools_tab, "工具")
+        self.control_tabs.addTab(tools_tab, "工具")
         
         # ========== 标签页5: GIS视图 ==========
         if GIS_AVAILABLE:
@@ -2965,10 +2977,18 @@ class GSSEGUI(QMainWindow):
             self.gis_load_to_cesium_btn.setEnabled(False)
             gis_load_layout.addWidget(self.gis_load_to_cesium_btn)
             
-            # 加载本地文件到Cesium按钮
-            self.gis_load_local_file_btn = QPushButton("加载本地模型文件(.ply/.splat)")
+            # 加载本地文件到分割视图按钮（先分割再加载）
+            self.gis_load_local_file_btn = QPushButton("加载本地模型文件(编辑→Cesium)")
             self.gis_load_local_file_btn.clicked.connect(self.load_local_model_to_cesium)
+            self.gis_load_local_file_btn.setToolTip("先在3D编辑视图中进行分割编辑，然后加载到Cesium")
             gis_load_layout.addWidget(self.gis_load_local_file_btn)
+            
+            # 直接加载本地文件到Cesium按钮（跳过分割）
+            self.gis_load_direct_btn = QPushButton("直接加载本地模型(跳过分割)")
+            self.gis_load_direct_btn.clicked.connect(self.load_local_model_direct_to_cesium)
+            self.gis_load_direct_btn.setToolTip("直接加载模型到Cesium，不进行分割操作")
+            self.gis_load_direct_btn.setStyleSheet("background-color: #424242;")
+            gis_load_layout.addWidget(self.gis_load_direct_btn)
             
             # 清除Cesium按钮
             self.gis_clear_cesium_btn = QPushButton("清除Cesium场景")
@@ -3038,7 +3058,7 @@ class GSSEGUI(QMainWindow):
             gis_tab_layout.addWidget(self.gis_status_label)
             
             gis_tab_layout.addStretch()
-            control_tabs.addTab(gis_tab, "GIS视图")
+            self.control_tabs.addTab(gis_tab, "GIS视图")
         else:
             # 如果GIS不可用，创建提示标签页
             gis_tab = QWidget()
@@ -3048,10 +3068,10 @@ class GSSEGUI(QMainWindow):
             no_gis_label.setStyleSheet("color: #B0B0B0; font-size: 14px;")
             gis_tab_layout.addWidget(no_gis_label)
             gis_tab_layout.addStretch()
-            control_tabs.addTab(gis_tab, "GIS视图")
+            self.control_tabs.addTab(gis_tab, "GIS视图")
         
         # 将所有标签页添加到父布局
-        parent_layout.addWidget(control_tabs)
+        parent_layout.addWidget(self.control_tabs)
     
     def create_display_panel(self, parent_layout):
         """创建中间显示面板"""
@@ -3263,7 +3283,9 @@ class GSSEGUI(QMainWindow):
         
         render_layout.addWidget(render_status_bar)
         
-        self.display_tabs.addTab(self.render_widget, "3D渲染")
+        # 只有在CUDA编辑器可用时才添加此标签页
+        if EDITOR_AVAILABLE:
+            self.display_tabs.addTab(self.render_widget, "3D渲染")
         
         # SAGS分割标签页（合并原始图像和分割结果）
         sags_split_widget = QWidget()
@@ -3330,6 +3352,15 @@ class GSSEGUI(QMainWindow):
             self.saga_canvas.clicked.connect(lambda x, y: self.on_saga_canvas_click(x, y))
             self.display_tabs.addTab(self.saga_canvas, "SAGA分割")
         
+        # Three.js 3D编辑视图标签页（合并了原3DGS分割和3D渲染功能）
+        if THREEJS_SPLITTER_AVAILABLE:
+            self.threejs_splitter_tab = ThreeJSSplatSplitterTab()
+            # 连接加载到Cesium的信号
+            self.threejs_splitter_tab.load_to_cesium_requested.connect(self.on_load_split_model_to_cesium)
+            self.display_tabs.addTab(self.threejs_splitter_tab, "3D编辑")
+        else:
+            self.threejs_splitter_tab = None
+        
         # Cesium GIS视图标签页
         if GIS_AVAILABLE:
             self.cesium_panel = CesiumPanel()
@@ -3352,29 +3383,70 @@ class GSSEGUI(QMainWindow):
         parent_layout.addWidget(self.display_tabs)
     
     def create_log_panel(self, parent_layout):
-        """创建右侧日志面板"""
+        """创建底部日志面板（可折叠）"""
+        # 标题栏（始终显示，用于折叠/展开）
+        self.log_header = QWidget()
+        self.log_header.setFixedHeight(42)
+        self.log_header.setStyleSheet("""
+            QWidget {
+                background-color: #2B2B2B;
+                border-top: 1px solid #404040;
+            }
+        """)
+        header_layout = QHBoxLayout(self.log_header)
+        header_layout.setContentsMargins(8, 6, 8, 6)
+        header_layout.setSpacing(8)
+        
+        # 折叠/展开按钮（使用文字代替箭头符号）
+        self.log_toggle_btn = QPushButton("展开")
+        self.log_toggle_btn.setFixedSize(60, 26)
+        self.log_toggle_btn.setToolTip("展开日志面板")
+        self.log_toggle_btn.clicked.connect(self.toggle_log_collapse)
+        self.log_toggle_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #424242;
+                color: #E0E0E0;
+                border: 1px solid #505050;
+                border-radius: 3px;
+                font-size: 11px;
+            }
+            QPushButton:hover {
+                background-color: #505050;
+            }
+        """)
+        header_layout.addWidget(self.log_toggle_btn)
+        
+        # 标题标签
         log_label = QLabel("系统日志")
         font = QFont()
         font.setBold(True)
-        font.setPointSize(12)
+        font.setPointSize(11)
         log_label.setFont(font)
-        parent_layout.addWidget(log_label)
+        header_layout.addWidget(log_label)
+        header_layout.addStretch()
         
-        # 日志控制按钮
-        log_control_layout = QHBoxLayout()
+        # 日志控制按钮放在标题栏右侧
         clear_btn = QPushButton("清空")
+        clear_btn.setFixedSize(60, 26)
         clear_btn.clicked.connect(self.clear_log)
         save_btn = QPushButton("保存")
+        save_btn.setFixedSize(60, 26)
         save_btn.clicked.connect(self.save_log)
-        log_control_layout.addWidget(clear_btn)
-        log_control_layout.addWidget(save_btn)
-        log_control_layout.addStretch()
-        parent_layout.addLayout(log_control_layout)
+        header_layout.addWidget(clear_btn)
+        header_layout.addWidget(save_btn)
+        
+        parent_layout.addWidget(self.log_header)
+        
+        # 日志内容区域（可折叠）
+        self.log_content = QWidget()
+        log_content_layout = QVBoxLayout(self.log_content)
+        log_content_layout.setContentsMargins(5, 0, 5, 5)
+        log_content_layout.setSpacing(0)
         
         # 日志文本框
         self.log_text = QTextEdit()
         self.log_text.setReadOnly(True)
-        self.log_text.setFont(QFont("Courier New", 11))
+        self.log_text.setFont(QFont("Courier New", 10))
         self.log_text.setStyleSheet("""
             QTextEdit {
                 background-color: #252525;
@@ -3382,7 +3454,59 @@ class GSSEGUI(QMainWindow):
                 border: 1px solid #404040;
             }
         """)
-        parent_layout.addWidget(self.log_text)
+        log_content_layout.addWidget(self.log_text)
+        
+        parent_layout.addWidget(self.log_content)
+        
+        # 默认隐藏日志内容
+        self.log_content.hide()
+    
+    def toggle_log_collapse(self):
+        """切换日志面板折叠/展开状态"""
+        if self.log_panel_collapsed:
+            self.expand_log_panel()
+        else:
+            self.collapse_log_panel()
+    
+    def expand_log_panel(self):
+        """展开日志面板"""
+        if not self.log_panel_collapsed:
+            return
+        
+        self.log_panel_collapsed = False
+        self.log_content.show()
+        self.log_toggle_btn.setText("收起")
+        self.log_toggle_btn.setToolTip("折叠日志面板")
+        
+        # 设置日志面板高度
+        if hasattr(self, 'vertical_splitter'):
+            sizes = self.vertical_splitter.sizes()
+            if len(sizes) >= 2:
+                total = sum(sizes)
+                new_log_height = self.log_panel_expanded_height
+                new_content_height = total - new_log_height
+                if new_content_height < 400:
+                    new_content_height = 400
+                    new_log_height = total - new_content_height
+                self.vertical_splitter.setSizes([new_content_height, new_log_height])
+    
+    def collapse_log_panel(self):
+        """折叠日志面板"""
+        if self.log_panel_collapsed:
+            return
+        
+        self.log_panel_collapsed = True
+        self.log_content.hide()
+        self.log_toggle_btn.setText("展开")
+        self.log_toggle_btn.setToolTip("展开日志面板")
+        
+        # 缩小日志面板高度到只显示标题栏
+        if hasattr(self, 'vertical_splitter'):
+            sizes = self.vertical_splitter.sizes()
+            if len(sizes) >= 2:
+                total = sum(sizes)
+                collapsed_height = 42  # 折叠时只显示标题栏的高度
+                self.vertical_splitter.setSizes([total - collapsed_height, collapsed_height])
     
     def create_status_bar(self):
         """创建状态栏"""
@@ -3789,6 +3913,10 @@ class GSSEGUI(QMainWindow):
         # 自动滚动到底部
         scrollbar = self.log_text.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+        
+        # 如果是错误级别，自动展开日志面板
+        if level == "error" and hasattr(self, 'log_panel_collapsed') and self.log_panel_collapsed:
+            self.expand_log_panel()
     
     def clear_log(self):
         """清空日志"""
@@ -4473,6 +4601,69 @@ GSSE - Gaussian Splatting Semantic Editor
             self.training_output_path_edit.setText(output_path)
     
     # 模型加载相关方法
+    def load_3dgs_to_render(self):
+        """直接加载3DGS模型文件(ply/splat)到3D渲染标签页"""
+        if not EDITOR_AVAILABLE:
+            QMessageBox.warning(self, "警告", "3D渲染模块不可用")
+            return
+        
+        # 选择文件
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择3DGS模型文件", "",
+            "Gaussian Splat Files (*.ply *.splat);;PLY Files (*.ply);;Splat Files (*.splat);;All Files (*)"
+        )
+        
+        if not file_path:
+            return
+        
+        def load_thread():
+            try:
+                self.update_status("正在加载3DGS模型到3D渲染...", 0)
+                self.log(f"开始加载3DGS模型: {file_path}")
+                
+                # 创建GaussianModel并加载ply文件
+                self.gaussians = GaussianModel(3)  # sh_degree=3
+                self.gaussians.load_ply(file_path)
+                
+                # 设置背景色
+                self.background = torch.tensor([0, 0, 0], dtype=torch.float32, device='cuda')
+                
+                # 初始化编辑器
+                self.gaussian_editor = GaussianEditor(self.gaussians)
+                self.log("3DGS编辑器初始化成功")
+                
+                # 标记模型已加载
+                self.model_loaded = True
+                
+                # 通过信号更新3D编辑视图（必须在主线程中执行）
+                self.update_editor_view_signal.emit()
+                
+                # 切换到3D渲染标签页
+                def switch_to_render_tab():
+                    if hasattr(self, 'display_tabs'):
+                        # 查找3D渲染标签页的索引
+                        for i in range(self.display_tabs.count()):
+                            if self.display_tabs.tabText(i) == "3D渲染":
+                                self.display_tabs.setCurrentIndex(i)
+                                break
+                
+                QTimer.singleShot(100, switch_to_render_tab)
+                
+                self.update_status("3DGS模型加载完成", 100)
+                self.log(f"3DGS模型加载完成: {os.path.basename(file_path)}")
+                
+                # 更新系统信息
+                self.update_system_info()
+                
+            except Exception as e:
+                self.update_status("模型加载失败", 0)
+                self.log(f"加载3DGS模型失败: {str(e)}", "error")
+                import traceback
+                traceback.print_exc()
+                self.show_message("错误", f"加载3DGS模型失败: {str(e)}", "critical")
+        
+        threading.Thread(target=load_thread, daemon=True).start()
+    
     def load_model(self):
         """加载3DGS模型"""
         def load_thread():
@@ -4949,13 +5140,37 @@ GSSE - Gaussian Splatting Semantic Editor
             traceback.print_exc()
     
     def on_display_tab_changed(self, index):
-        """标签页切换事件处理"""
-        if not SAGA_AVAILABLE:
-            return
+        """标签页切换事件处理 - 联动左侧视图标签页和右侧面板标签页"""
+        # 获取当前选中的左侧视图标签页名称
+        current_tab_name = self.display_tabs.tabText(index)
         
-        # 检查是否切换到SAGA标签页（需要根据实际标签页顺序确定索引）
-        # 标签页顺序：3D渲染(0), SAGS分割(1), SAGA分割(2)
-        if hasattr(self, 'saga_canvas'):
+        # 根据左侧视图标签页联动右侧面板标签页
+        # 右侧面板标签页顺序：模型训练(0), SAGS分割(1), SAGA分割(2), 工具(3), GIS视图(4)
+        if hasattr(self, 'control_tabs') and hasattr(self, 'right_scroll'):
+            if current_tab_name == "3D渲染":
+                # 3D渲染时，隐藏整个右侧面板
+                self.right_scroll.hide()
+            elif current_tab_name == "SAGS分割":
+                # SAGS分割时，右侧自动切换为"SAGS分割"标签页
+                self.right_scroll.show()
+                self.control_tabs.setCurrentIndex(1)  # SAGS分割
+            elif current_tab_name == "SAGA分割":
+                # SAGA分割时，右侧自动切换为"SAGA分割"标签页
+                self.right_scroll.show()
+                self.control_tabs.setCurrentIndex(2)  # SAGA分割
+            elif current_tab_name == "Cesium GIS":
+                # Cesium GIS时，右侧自动切换为"GIS视图"标签页
+                self.right_scroll.show()
+                self.control_tabs.setCurrentIndex(4)  # GIS视图
+            elif current_tab_name == "3D编辑":
+                # 3D编辑时，隐藏整个右侧面板
+                self.right_scroll.hide()
+            else:
+                # 其他情况显示右侧面板
+                self.right_scroll.show()
+        
+        # 原有的SAGA标签页切换逻辑
+        if SAGA_AVAILABLE and hasattr(self, 'saga_canvas'):
             # 找到SAGA标签页的索引
             saga_tab_index = -1
             for i in range(self.display_tabs.count()):
@@ -9667,8 +9882,8 @@ COLMAP输出: {colmap_output_path}
         
         # 更新提示文字颜色
         hint_labels = []
-        if hasattr(self, 'left_widget'):
-            hint_labels = self.left_widget.findChildren(QLabel)
+        if hasattr(self, 'right_widget'):
+            hint_labels = self.right_widget.findChildren(QLabel)
         
         for label in hint_labels:
             current_style = label.styleSheet()
@@ -9706,6 +9921,24 @@ COLMAP输出: {colmap_output_path}
                     background-color: {self.bg_panel};
                     color: {self.text_color};
                     border: 1px solid {self.border_color};
+                }}
+            """)
+        
+        # 更新日志折叠按钮样式
+        if hasattr(self, 'log_toggle_btn'):
+            btn_bg = '#424242' if self.current_theme == 'dark' else '#FFFFFF'
+            btn_hover = '#505050' if self.current_theme == 'dark' else '#F0F0F0'
+            self.log_toggle_btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {btn_bg};
+                    color: {self.text_color};
+                    border: 1px solid {self.border_color};
+                    border-radius: 3px;
+                    font-size: 12px;
+                    font-weight: bold;
+                }}
+                QPushButton:hover {{
+                    background-color: {btn_hover};
                 }}
             """)
         
@@ -10112,16 +10345,47 @@ COLMAP输出: {colmap_output_path}
             QMessageBox.critical(self, "错误", f"加载到Cesium失败: {e}")
     
     def load_local_model_to_cesium(self):
-        """加载本地模型文件到Cesium"""
-        if not GIS_AVAILABLE or self.cesium_widget is None:
-            QMessageBox.warning(self, "警告", "请先加载Cesium视图")
-            return
-            
+        """加载本地模型文件 - 先打开3D编辑视图进行分割编辑操作"""
+        # 选择模型文件
         file_path, _ = QFileDialog.getOpenFileName(
             self, "选择模型文件", "", "Gaussian Splat Files (*.ply *.splat *.ksplat);;All Files (*)"
         )
         
         if not file_path:
+            return
+        
+        # 检查是否有Three.js编辑视图可用
+        if THREEJS_SPLITTER_AVAILABLE and hasattr(self, 'threejs_splitter_tab') and self.threejs_splitter_tab:
+            self.log(f"打开3D编辑视图: {file_path}", "info")
+            
+            # 获取当前GIS坐标设置
+            lon = float(self.gis_longitude_input.value())
+            lat = float(self.gis_latitude_input.value())
+            alt = float(self.gis_altitude_input.value())
+            scale = float(self.gis_scale_input.value())
+            
+            # 设置坐标到分割视图
+            self.threejs_splitter_tab.set_coordinates(lon, lat, alt, scale)
+            
+            # 加载模型到分割视图
+            self.threejs_splitter_tab.load_model(file_path)
+            
+            # 切换到3D编辑标签页
+            for i in range(self.display_tabs.count()):
+                if self.display_tabs.tabText(i) == "3D编辑":
+                    self.display_tabs.setCurrentIndex(i)
+                    break
+            
+            self.log("模型已加载到3D编辑视图，请进行分割或编辑操作", "info")
+            self.log("完成分割后，点击'导出分割模型并加载到Cesium'按钮", "info")
+        else:
+            # 如果分割视图不可用，直接加载到Cesium
+            self._load_model_directly_to_cesium(file_path)
+    
+    def _load_model_directly_to_cesium(self, file_path: str):
+        """直接加载模型到Cesium（不经过分割）"""
+        if not GIS_AVAILABLE or self.cesium_widget is None:
+            QMessageBox.warning(self, "警告", "请先加载Cesium视图")
             return
             
         try:
@@ -10134,8 +10398,6 @@ COLMAP输出: {colmap_output_path}
             scale = float(self.gis_scale_input.value())
             
             from cesium_model_manager import CesiumModelManager
-            # 注意：这里应该复用已有的manager实例，但当前架构是在load_model_to_cesium中临时创建的
-            # 最好将manager作为类成员
             if not hasattr(self, 'cesium_model_manager'):
                 self.cesium_model_manager = CesiumModelManager(self.cesium_widget)
             
@@ -10145,8 +10407,7 @@ COLMAP输出: {colmap_output_path}
             
             self.log(f"本地模型加载成功: {model_id}", "info")
             
-            # 启用截图功能（即使没有Python端的gaussians对象）
-            # 对于Cesium中的模型，我们将通过JavaScript端进行射线检测
+            # 启用截图功能
             if hasattr(self, 'gis_screenshot_btn'):
                 self.gis_screenshot_btn.setEnabled(True)
                 self.log("截图功能已启用（Cesium模型模式）", "info")
@@ -10156,6 +10417,46 @@ COLMAP输出: {colmap_output_path}
             self.log(f"加载本地模型失败: {e}", "error")
             self.log(f"详细错误: {traceback.format_exc()}", "error")
             QMessageBox.critical(self, "错误", f"加载失败: {e}")
+    
+    def on_load_split_model_to_cesium(self, file_path: str, lon: float, lat: float, alt: float, scale: float):
+        """处理从3D编辑视图加载分割后模型到Cesium的请求"""
+        if not GIS_AVAILABLE or self.cesium_widget is None:
+            QMessageBox.warning(self, "警告", "Cesium视图不可用")
+            return
+            
+        try:
+            self.log(f"正在加载分割后的模型到Cesium: {file_path}", "info")
+            
+            from cesium_model_manager import CesiumModelManager
+            if not hasattr(self, 'cesium_model_manager'):
+                self.cesium_model_manager = CesiumModelManager(self.cesium_widget)
+            
+            model_id = self.cesium_model_manager.load_local_model(
+                file_path, lon, lat, alt, scale=scale, fly_to=True
+            )
+            
+            self.log(f"分割模型加载成功: {model_id}", "info")
+            
+            # 切换到Cesium GIS标签页
+            for i in range(self.display_tabs.count()):
+                if self.display_tabs.tabText(i) == "Cesium GIS":
+                    self.display_tabs.setCurrentIndex(i)
+                    break
+            
+        except Exception as e:
+            import traceback
+            self.log(f"加载分割模型失败: {e}", "error")
+            self.log(f"详细错误: {traceback.format_exc()}", "error")
+            QMessageBox.critical(self, "错误", f"加载失败: {e}")
+    
+    def load_local_model_direct_to_cesium(self):
+        """直接加载本地模型到Cesium（跳过分割视图）"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "选择模型文件", "", "Gaussian Splat Files (*.ply *.splat *.ksplat);;All Files (*)"
+        )
+        
+        if file_path:
+            self._load_model_directly_to_cesium(file_path)
 
     def clear_cesium_scene(self):
         """清除Cesium场景"""

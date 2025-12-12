@@ -1,0 +1,3690 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>GSSE Three.js 3DGS编辑器</title>
+    
+    <!-- Three.js -->
+    <script src="https://unpkg.com/three@0.152.2/build/three.min.js" 
+            onerror="loadLocalThree();"></script>
+    
+    <script>
+        function loadLocalThree() {
+            if (typeof THREE === 'undefined') {
+                const script = document.createElement('script');
+                script.src = './lib/threejs/three.min.js';
+                document.head.appendChild(script);
+            }
+        }
+    </script>
+    
+    <!-- Gaussian Splats 3D -->
+    <script>
+        function loadGaussianSplats3D() {
+            if (typeof THREE === 'undefined') {
+                setTimeout(loadGaussianSplats3D, 100);
+                return;
+            }
+            
+            const script = document.createElement('script');
+            script.src = './lib/gaussian-splats-3d/gaussian-splats-3d.umd.cjs';
+            script.onload = function() {
+                const GaussianSplats3D = window["Gaussian Splats 3D"] || window.GaussianSplats3D;
+                if (GaussianSplats3D && typeof GaussianSplats3D.Viewer !== 'undefined') {
+                    window.GaussianSplats3D = GaussianSplats3D;
+                    console.log('[ThreeJS Info] GaussianSplats3D库已加载');
+                }
+            };
+            document.head.appendChild(script);
+        }
+        loadGaussianSplats3D();
+    </script>
+
+    <style>
+        :root {
+            --bg-primary: #121218;
+            --bg-secondary: #1e1e2e;
+            --bg-tertiary: #2a2a3e;
+            --bg-hover: #3d3d5c;
+            --accent-color: #8b5cf6;
+            --accent-hover: #a78bfa;
+            --accent-light: rgba(139, 92, 246, 0.15);
+            --text-primary: #e8e8f0;
+            --text-secondary: #9898b0;
+            --border-color: #3d3d5c;
+            --success-color: #22c55e;
+            --warning-color: #eab308;
+            --danger-color: #ef4444;
+        }
+        
+        html, body {
+            width: 100%;
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: var(--bg-primary);
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+        
+        #container {
+            width: 100%;
+            height: 100%;
+            position: relative;
+        }
+        
+        /* 左侧场景管理器面板 */
+        #scene-manager-panel {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            width: 320px;
+            z-index: 1000;
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+            overflow: hidden;
+            max-height: calc(100vh - 100px);
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border-color);
+        }
+        
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .panel-header:hover {
+            background: var(--bg-hover);
+        }
+        
+        .panel-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 15px;
+        }
+        
+        .panel-title-icon {
+            width: 22px;
+            height: 22px;
+            background: var(--accent-color);
+            border-radius: 5px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+        }
+        
+        .panel-actions {
+            display: flex;
+            gap: 6px;
+        }
+        
+        .panel-action-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.15s;
+        }
+        
+        .panel-action-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        
+        .panel-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .panel-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        .panel-content::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+        
+        /* 模型列表项 */
+        .model-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 14px;
+            margin-bottom: 6px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid transparent;
+        }
+        
+        .model-item:hover {
+            background: var(--bg-hover);
+        }
+        
+        .model-item.selected {
+            border-color: var(--accent-color);
+            background: var(--accent-light);
+        }
+        
+        .model-item-icon {
+            width: 36px;
+            height: 36px;
+            margin-right: 12px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+        
+        .model-item-info {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        .model-item-name {
+            font-size: 14px;
+            font-weight: 500;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        
+        .model-item-type {
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        
+        .model-item-actions {
+            display: flex;
+            gap: 4px;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        
+        .model-item:hover .model-item-actions {
+            opacity: 1;
+        }
+        
+        .model-action-btn {
+            width: 30px;
+            height: 30px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            transition: all 0.15s;
+        }
+        
+        .model-action-btn:hover {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+        }
+        
+        .model-action-btn.hidden-state {
+            color: var(--text-secondary);
+            opacity: 0.5;
+        }
+        
+        .model-action-btn.delete:hover {
+            background: var(--danger-color);
+            color: white;
+        }
+        
+        /* 变换面板 */
+        .transform-section {
+            margin-top: 12px;
+            padding: 14px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+        
+        .transform-section-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 14px;
+            font-weight: 600;
+            font-size: 14px;
+            color: var(--accent-color);
+        }
+        
+        .transform-row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+        
+        .transform-label {
+            width: 50px;
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+        
+        .transform-inputs {
+            display: flex;
+            gap: 6px;
+            flex: 1;
+        }
+        
+        .transform-input-group {
+            display: flex;
+            align-items: center;
+            flex: 1;
+        }
+        
+        .transform-axis-label {
+            width: 18px;
+            font-size: 12px;
+            font-weight: 600;
+            text-align: center;
+        }
+        
+        .transform-axis-label.x { color: #f87171; }
+        .transform-axis-label.y { color: #4ade80; }
+        .transform-axis-label.z { color: #60a5fa; }
+        
+        .transform-input {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 13px;
+            text-align: right;
+        }
+        
+        .transform-input:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px var(--accent-light);
+        }
+        
+        /* 右侧工具栏 */
+        #right-toolbar {
+            position: absolute;
+            top: 50%;
+            right: 14px;
+            transform: translateY(-50%);
+            z-index: 1000;
+            background: var(--bg-secondary);
+            padding: 10px;
+            border-radius: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+            border: 1px solid var(--border-color);
+        }
+        
+        .toolbar-divider {
+            height: 1px;
+            background: var(--border-color);
+            margin: 6px 0;
+        }
+        
+        .tool-btn {
+            width: 44px;
+            height: 44px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            transition: all 0.15s ease;
+            position: relative;
+        }
+        
+        .tool-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        
+        .tool-btn.active {
+            background: var(--accent-color);
+            color: white;
+        }
+        
+        .tool-btn:disabled {
+            opacity: 0.3;
+            cursor: not-allowed;
+        }
+        
+        .tool-btn[data-tooltip]:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            right: 54px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            white-space: nowrap;
+            z-index: 1001;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.4);
+            border: 1px solid var(--border-color);
+        }
+
+        /* 底部工具栏 */
+        #bottom-toolbar {
+            position: absolute;
+            bottom: 14px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 1000;
+            background: var(--bg-secondary);
+            padding: 10px 16px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+            border: 1px solid var(--border-color);
+        }
+        
+        .bottom-tool-group {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .bottom-divider {
+            width: 1px;
+            height: 32px;
+            background: var(--border-color);
+            margin: 0 6px;
+        }
+        
+        .bottom-btn {
+            width: 38px;
+            height: 38px;
+            border: none;
+            border-radius: 8px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.15s;
+        }
+        
+        .bottom-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        
+        .bottom-btn.active {
+            background: var(--accent-color);
+            color: white;
+        }
+        
+        .bottom-btn[data-tooltip]:hover::before {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 52px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            white-space: nowrap;
+            z-index: 1001;
+            border: 1px solid var(--border-color);
+        }
+        
+        /* 右上角3D坐标轴指示器 */
+        #axis-indicator {
+            position: absolute;
+            top: 14px;
+            right: 80px;
+            width: 100px;
+            height: 100px;
+            z-index: 1000;
+            pointer-events: none;
+        }
+        
+        #axis-canvas {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* 底部状态栏 */
+        #status-bar {
+            position: absolute;
+            bottom: 14px;
+            right: 14px;
+            z-index: 1000;
+            background: var(--bg-secondary);
+            padding: 10px 16px;
+            border-radius: 8px;
+            display: flex;
+            gap: 20px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            border: 1px solid var(--border-color);
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .status-value {
+            color: var(--accent-color);
+            font-weight: 600;
+        }
+        
+        /* 加载遮罩 */
+        #loading-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(18, 18, 24, 0.95);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+        }
+        
+        #loading-overlay.hidden {
+            display: none;
+        }
+        
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 4px solid var(--bg-tertiary);
+            border-top: 4px solid var(--accent-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        #loading-text {
+            color: var(--text-secondary);
+            font-size: 15px;
+        }
+        
+        /* 选择框覆盖层 */
+        #selection-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 500;
+        }
+        
+        .selection-box {
+            position: absolute;
+            border: 2px dashed var(--accent-color);
+            background: var(--accent-light);
+            pointer-events: none;
+        }
+        
+        /* 笔刷光标 */
+        #brush-cursor {
+            position: fixed;
+            left: 0;
+            top: 0;
+            border: 2px solid var(--accent-color);
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 501;
+            display: none;
+            will-change: transform;
+            background: var(--accent-light);
+        }
+        
+        /* 变换模式指示器 */
+        #transform-mode-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: var(--bg-secondary);
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 15px;
+            color: var(--accent-color);
+            display: none;
+            z-index: 999;
+            pointer-events: none;
+            border: 1px solid var(--border-color);
+            font-weight: 500;
+        }
+        
+        #transform-mode-indicator.visible {
+            display: block;
+            animation: fadeInOut 2s ease-in-out;
+        }
+        
+        @keyframes fadeInOut {
+            0%, 100% { opacity: 0; }
+            10%, 90% { opacity: 1; }
+        }
+        
+        /* 快捷键面板 */
+        #shortcuts-panel {
+            position: absolute;
+            bottom: 70px;
+            right: 14px;
+            z-index: 1000;
+            background: var(--bg-secondary);
+            padding: 16px;
+            border-radius: 10px;
+            display: none;
+            min-width: 220px;
+            border: 1px solid var(--border-color);
+        }
+        
+        #shortcuts-panel.visible {
+            display: block;
+        }
+        
+        .shortcuts-title {
+            font-weight: 600;
+            font-size: 14px;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .shortcut-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 5px 0;
+            font-size: 13px;
+        }
+        
+        .shortcut-key {
+            color: var(--accent-color);
+            font-family: monospace;
+            background: var(--bg-tertiary);
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+        }
+        
+        /* 空状态提示 */
+        .empty-state {
+            text-align: center;
+            padding: 30px;
+            color: var(--text-secondary);
+        }
+        
+        .empty-state-icon {
+            font-size: 42px;
+            margin-bottom: 12px;
+            opacity: 0.5;
+        }
+        
+        .empty-state-text {
+            font-size: 13px;
+            line-height: 1.6;
+        }
+        
+        /* 渲染模式选择器 */
+        .render-mode-select {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 8px 14px;
+            font-size: 13px;
+            cursor: pointer;
+            outline: none;
+        }
+        
+        .render-mode-select:hover {
+            border-color: var(--accent-color);
+        }
+        
+        .render-mode-select:focus {
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px var(--accent-light);
+        }
+        
+        /* 点云叠加控制 */
+        .overlay-control {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            background: var(--bg-tertiary);
+            border-radius: 6px;
+            font-size: 13px;
+        }
+        
+        .overlay-checkbox {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent-color);
+            cursor: pointer;
+        }
+        
+        .overlay-control label {
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    
+    <div id="loading-overlay" class="hidden">
+        <div class="spinner"></div>
+        <div id="loading-text">加载中...</div>
+    </div>
+
+    <!-- 左侧场景管理器面板 -->
+    <div id="scene-manager-panel">
+        <div class="panel-header" onclick="togglePanel('scene-manager')">
+            <div class="panel-title">
+                <div class="panel-title-icon">📦</div>
+                <span>场景管理器</span>
+            </div>
+            <div class="panel-actions">
+                <button class="panel-action-btn" onclick="event.stopPropagation(); addModelDialog()" title="添加模型">➕</button>
+                <button class="panel-action-btn" onclick="event.stopPropagation(); focusSelected()" title="聚焦选中">🎯</button>
+            </div>
+        </div>
+        <div class="panel-content" id="scene-manager-content">
+            <div id="model-list">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📭</div>
+                    <div class="empty-state-text">暂无模型<br>点击 ➕ 添加模型</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 变换面板 -->
+        <div class="transform-section" id="transform-panel" style="display: none;">
+            <div class="transform-section-header">
+                <span>➕</span>
+                <span>变换</span>
+            </div>
+            <div class="transform-row">
+                <span class="transform-label">位置</span>
+                <div class="transform-inputs">
+                    <div class="transform-input-group">
+                        <span class="transform-axis-label x">X</span>
+                        <input type="number" class="transform-input" id="pos-x" step="0.1" value="0" onchange="updateTransformFromInput('position')">
+                    </div>
+                    <div class="transform-input-group">
+                        <span class="transform-axis-label y">Y</span>
+                        <input type="number" class="transform-input" id="pos-y" step="0.1" value="0" onchange="updateTransformFromInput('position')">
+                    </div>
+                    <div class="transform-input-group">
+                        <span class="transform-axis-label z">Z</span>
+                        <input type="number" class="transform-input" id="pos-z" step="0.1" value="0" onchange="updateTransformFromInput('position')">
+                    </div>
+                </div>
+            </div>
+            <div class="transform-row">
+                <span class="transform-label">旋转</span>
+                <div class="transform-inputs">
+                    <div class="transform-input-group">
+                        <span class="transform-axis-label x">X</span>
+                        <input type="number" class="transform-input" id="rot-x" step="1" value="0" onchange="updateTransformFromInput('rotation')">
+                    </div>
+                    <div class="transform-input-group">
+                        <span class="transform-axis-label y">Y</span>
+                        <input type="number" class="transform-input" id="rot-y" step="1" value="0" onchange="updateTransformFromInput('rotation')">
+                    </div>
+                    <div class="transform-input-group">
+                        <span class="transform-axis-label z">Z</span>
+                        <input type="number" class="transform-input" id="rot-z" step="1" value="0" onchange="updateTransformFromInput('rotation')">
+                    </div>
+                </div>
+            </div>
+            <div class="transform-row">
+                <span class="transform-label">缩放</span>
+                <div class="transform-inputs">
+                    <div class="transform-input-group">
+                        <input type="number" class="transform-input" id="scale-uniform" step="0.1" value="1" min="0.01" onchange="updateTransformFromInput('scale')">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 右侧工具栏 -->
+    <div id="right-toolbar">
+        <button class="tool-btn" id="tool-select" data-tooltip="选择 (Q)" onclick="setTool('select')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/>
+            </svg>
+        </button>
+        <button class="tool-btn active" id="tool-move-view" data-tooltip="移动视角 (V)" onclick="setTool('move')">🖐️</button>
+        
+        <div class="toolbar-divider"></div>
+        
+        <button class="tool-btn" id="tool-box" data-tooltip="框选 (B)" onclick="setTool('box')">⬜</button>
+        <button class="tool-btn" id="tool-lasso" data-tooltip="套索 (L)" onclick="setTool('lasso')">〰️</button>
+        <button class="tool-btn" id="tool-brush" data-tooltip="笔刷 (P)" onclick="setTool('brush')">🖌️</button>
+        
+        <div class="toolbar-divider"></div>
+        
+        <button class="tool-btn" id="tool-translate" data-tooltip="移动 (G)" onclick="setTransformMode('translate')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>
+            </svg>
+        </button>
+        <button class="tool-btn" id="tool-rotate" data-tooltip="旋转 (R)" onclick="setTransformMode('rotate')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 12a9 9 0 11-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/>
+                <path d="M21 3v5h-5"/>
+            </svg>
+        </button>
+        <button class="tool-btn" id="tool-scale" data-tooltip="缩放 (S)" onclick="setTransformMode('scale')">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M21 21l-6-6m6 6v-4m0 4h-4M3 3l6 6M3 3v4m0-4h4"/>
+            </svg>
+        </button>
+        
+        <div class="toolbar-divider"></div>
+        
+        <button class="tool-btn" id="btn-deselect" data-tooltip="取消选中 (Esc)" onclick="deselectAll()">✖️</button>
+        
+        <div class="toolbar-divider"></div>
+        
+        <button class="tool-btn" data-tooltip="设置" onclick="toggleShortcuts()">⚙️</button>
+    </div>
+    
+    <!-- 底部工具栏 -->
+    <div id="bottom-toolbar">
+        <div class="bottom-tool-group">
+            <button class="bottom-btn" data-tooltip="撤销" onclick="undo()">↩️</button>
+            <button class="bottom-btn" data-tooltip="重做" onclick="redo()">↪️</button>
+        </div>
+        
+        <div class="bottom-divider"></div>
+        
+        <div class="bottom-tool-group">
+            <button class="bottom-btn" data-tooltip="全选" onclick="selectAll()">◻️</button>
+            <button class="bottom-btn" data-tooltip="反选" onclick="selectInverse()">🔄</button>
+            <button class="bottom-btn" data-tooltip="隐藏选中" onclick="hideSelected()">👁️</button>
+            <button class="bottom-btn" data-tooltip="显示全部" onclick="showAll()">👀</button>
+        </div>
+        
+        <div class="bottom-divider"></div>
+        
+        <div class="bottom-tool-group">
+            <button class="bottom-btn" id="btn-grid" data-tooltip="网格" onclick="toggleGrid()">▦</button>
+            <button class="bottom-btn" id="btn-axes" data-tooltip="坐标轴" onclick="toggleAxes()">✛</button>
+        </div>
+        
+        <div class="bottom-divider"></div>
+        
+        <div class="bottom-tool-group">
+            <select class="render-mode-select" id="render-mode" onchange="setRenderMode(this.value)">
+                <option value="splat">Splat渲染</option>
+                <option value="points">点云渲染</option>
+                <option value="centers">中心点</option>
+            </select>
+        </div>
+        
+        <div class="bottom-divider"></div>
+        
+        <div class="overlay-control">
+            <input type="checkbox" class="overlay-checkbox" id="pointcloud-overlay" onchange="togglePointCloudOverlay(this.checked)">
+            <label for="pointcloud-overlay">叠加点云</label>
+        </div>
+        
+        <div class="bottom-divider"></div>
+        
+        <div class="bottom-tool-group">
+            <button class="bottom-btn" data-tooltip="复位视角" onclick="resetCamera()">🏠</button>
+            <button class="bottom-btn danger" data-tooltip="删除选中" onclick="deleteSelected()" style="color: var(--danger-color);">🗑️</button>
+        </div>
+    </div>
+    
+    <!-- 3D坐标轴指示器 -->
+    <div id="axis-indicator">
+        <canvas id="axis-canvas"></canvas>
+    </div>
+    
+    <!-- 底部状态栏 -->
+    <div id="status-bar">
+        <div class="status-item">
+            <span>点数:</span>
+            <span class="status-value" id="pointCount">0</span>
+        </div>
+        <div class="status-item">
+            <span>选中:</span>
+            <span class="status-value" id="selectedCount">0</span>
+        </div>
+        <div class="status-item">
+            <span>FPS:</span>
+            <span class="status-value" id="fps">0</span>
+        </div>
+    </div>
+    
+    <!-- 选择框覆盖层 -->
+    <div id="selection-overlay"></div>
+    
+    <!-- 笔刷光标 -->
+    <div id="brush-cursor"></div>
+    
+    <!-- 变换模式指示器 -->
+    <div id="transform-mode-indicator"></div>
+    
+    <!-- 快捷键面板 -->
+    <div id="shortcuts-panel">
+        <div class="shortcuts-title">快捷键</div>
+        <div class="shortcut-row"><span>框选</span><span class="shortcut-key">B</span></div>
+        <div class="shortcut-row"><span>套索</span><span class="shortcut-key">L</span></div>
+        <div class="shortcut-row"><span>笔刷</span><span class="shortcut-key">P</span></div>
+        <div class="shortcut-row"><span>移动视角</span><span class="shortcut-key">V</span></div>
+        <div class="shortcut-row"><span>移动模型</span><span class="shortcut-key">G</span></div>
+        <div class="shortcut-row"><span>旋转模型</span><span class="shortcut-key">R</span></div>
+        <div class="shortcut-row"><span>缩放模型</span><span class="shortcut-key">S</span></div>
+        <div class="shortcut-row"><span>取消选中</span><span class="shortcut-key">Esc</span></div>
+        <div class="shortcut-row"><span>全选</span><span class="shortcut-key">Ctrl+A</span></div>
+        <div class="shortcut-row"><span>删除</span><span class="shortcut-key">Delete</span></div>
+        <div class="shortcut-row"><span>撤销</span><span class="shortcut-key">Ctrl+Z</span></div>
+    </div>
+
+    <!-- Qt WebChannel -->
+    <script>
+        if (typeof qt !== 'undefined' && qt.webChannelTransport) {
+            const script = document.createElement('script');
+            script.src = 'qrc:///qtwebchannel/qwebchannel.js';
+            document.head.appendChild(script);
+        }
+    </script>
+""
+
+    <script>
+        // ==================== 全局变量 ====================
+        let scene = null;
+        let camera = null;
+        let renderer = null;
+        let pyBridge = null;
+        let isInitialized = false;
+        
+        // 场景管理
+        const sceneModels = new Map(); // id -> { viewer, mesh, name, type, visible, position, rotation, scale }
+        let selectedModelId = null;
+        let modelIdCounter = 0;
+        
+        // 编辑状态
+        let currentTool = 'move';  // 'select', 'move', 'box', 'lasso', 'brush'
+        let transformMode = null;  // 'translate', 'rotate', 'scale'
+        let renderMode = 'splat';
+        
+        // 选择状态
+        let selectedPointIndices = new Set();
+        let hiddenPointIndices = new Set();
+        let lockedPointIndices = new Set();
+        
+        // 选择操作
+        let isSelecting = false;
+        let selectionStart = null;
+        let selectionPath = [];
+        let brushSize = 30;
+        
+        // 撤销/重做栈
+        let undoStack = [];
+        let redoStack = [];
+        const MAX_UNDO_STEPS = 50;
+        
+        // 辅助对象
+        let infiniteGrid = null;
+        let axesHelper = null;
+        let pointCloudMesh = null;
+        let highlightMesh = null;
+        let pointCloudOverlayMesh = null;
+        let showPointCloudOverlay = false;
+        
+        // TransformControls
+        let transformControls = null;
+        let transformHelper = null;
+        
+        // 相机控制
+        let spherical = { radius: 15, phi: Math.PI / 4, theta: 0 };
+        let target = new THREE.Vector3(0, 0, 0);
+        let isDragging = false;
+        let previousMousePosition = { x: 0, y: 0 };
+        
+        // 坐标轴指示器
+        let axisScene = null;
+        let axisCamera = null;
+        let axisRenderer = null;
+        
+        // 消息队列
+        const messageQueue = [];
+        
+        // ==================== 初始化 ====================
+        function init() {
+            const container = document.getElementById('container');
+            
+            // 创建场景
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x121218);
+            
+            // 创建相机
+            camera = new THREE.PerspectiveCamera(
+                75,
+                container.clientWidth / container.clientHeight,
+                0.1,
+                1000
+            );
+            camera.position.set(0, 5, 10);
+            
+            // 创建渲染器
+            renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+            renderer.setSize(container.clientWidth, container.clientHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            container.appendChild(renderer.domElement);
+            
+            // 创建无限网格
+            createInfiniteGrid();
+            
+            // 添加坐标轴
+            axesHelper = new THREE.AxesHelper(5);
+            scene.add(axesHelper);
+            
+            // 添加环境光
+            const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+            scene.add(ambientLight);
+            
+            // 添加方向光
+            const directionalLight = new THREE.DirectionalLight(0xffffff, 0.8);
+            directionalLight.position.set(10, 10, 10);
+            scene.add(directionalLight);
+            
+            // 初始化TransformControls
+            initTransformControls();
+            
+            // 初始化坐标轴指示器
+            initAxisIndicator();
+            
+            // 设置事件监听
+            setupEventListeners();
+            
+            // 初始化WebChannel
+            initWebChannel();
+            
+            // 更新相机位置
+            updateCameraPosition();
+            
+            // 开始渲染循环
+            animate();
+            
+            isInitialized = true;
+            
+            // 处理队列中的消息
+            while (messageQueue.length > 0) {
+                const msg = messageQueue.shift();
+                window.receiveMessageFromPython(msg);
+            }
+            
+            // 通知Python初始化完成
+            sendToPython({ type: 'viewerReady' });
+            
+            // 窗口大小调整
+            window.addEventListener('resize', onWindowResize);
+            
+            // 设置默认工具状态
+            setTool('move');
+        }
+        
+        // 创建无限网格（类似SuperSplat风格）
+        function createInfiniteGrid() {
+            const gridGroup = new THREE.Group();
+            
+            // 小网格（细线）
+            const smallGridSize = 100;
+            const smallGridDivisions = 100;
+            const smallGrid = new THREE.GridHelper(smallGridSize, smallGridDivisions, 0x444466, 0x333344);
+            smallGrid.material.opacity = 0.4;
+            smallGrid.material.transparent = true;
+            smallGrid.material.depthWrite = false;
+            gridGroup.add(smallGrid);
+            
+            // 大网格（粗线，每10个单位）
+            const largeGrid = new THREE.GridHelper(smallGridSize, smallGridDivisions / 10, 0x555577, 0x555577);
+            largeGrid.material.opacity = 0.6;
+            largeGrid.material.transparent = true;
+            largeGrid.material.depthWrite = false;
+            largeGrid.position.y = 0.001; // 稍微抬高避免z-fighting
+            gridGroup.add(largeGrid);
+            
+            // X轴线（红色）
+            const xAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(-smallGridSize/2, 0, 0),
+                new THREE.Vector3(smallGridSize/2, 0, 0)
+            ]);
+            const xAxisMaterial = new THREE.LineBasicMaterial({ color: 0xff4444, linewidth: 2, depthWrite: false });
+            const xAxis = new THREE.Line(xAxisGeometry, xAxisMaterial);
+            xAxis.position.y = 0.002;
+            gridGroup.add(xAxis);
+            
+            // Z轴线（蓝色）
+            const zAxisGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, -smallGridSize/2),
+                new THREE.Vector3(0, 0, smallGridSize/2)
+            ]);
+            const zAxisMaterial = new THREE.LineBasicMaterial({ color: 0x4444ff, linewidth: 2, depthWrite: false });
+            const zAxis = new THREE.Line(zAxisGeometry, zAxisMaterial);
+            zAxis.position.y = 0.002;
+            gridGroup.add(zAxis);
+            
+            infiniteGrid = gridGroup;
+            scene.add(infiniteGrid);
+        }
+        
+        // 变换控制器交互状态
+        let isTransforming = false;
+        let transformAxis = null;
+        let transformStartPoint = new THREE.Vector3();
+        let transformStartValue = null;
+        let transformRaycaster = new THREE.Raycaster();
+        let transformPlane = new THREE.Plane();
+        let transformStartMouse = new THREE.Vector2();
+        let transformStartRotation = new THREE.Euler();
+        
+        // 变换控制器专用场景
+        let transformScene = null;
+        
+        // 初始化TransformControls（自定义实现）
+        function initTransformControls() {
+            // 创建变换控制器专用场景
+            transformScene = new THREE.Scene();
+            
+            // 创建变换辅助器组
+            transformHelper = new THREE.Group();
+            transformHelper.visible = false;
+            transformHelper.renderOrder = 99999; // 确保在最上层渲染
+            transformScene.add(transformHelper);
+        }
+        
+        // 设置材质为始终在最上层
+        function setAlwaysOnTop(object) {
+            object.traverse((child) => {
+                if (child.material) {
+                    // 确保材质始终在最上层渲染
+                    child.material.depthTest = false;
+                    child.material.depthWrite = false;
+                    child.material.transparent = true;
+                    child.material.needsUpdate = true;
+                    child.renderOrder = 99999;
+                }
+                child.renderOrder = 99999;
+            });
+            object.renderOrder = 99999;
+        }
+        
+        // 创建移动控制器
+        function createTranslateHelper() {
+            clearTransformHelper();
+            
+            const arrowLength = 2.5;
+            const coneHeight = 0.4;
+            const coneRadius = 0.12;
+            const lineWidth = 0.04;
+            
+            // X轴 - 红色
+            const xGroup = createTranslateAxis(0xff4444, 'x', new THREE.Vector3(1, 0, 0), arrowLength, coneHeight, coneRadius, lineWidth);
+            transformHelper.add(xGroup);
+            
+            // Y轴 - 绿色
+            const yGroup = createTranslateAxis(0x44ff44, 'y', new THREE.Vector3(0, 1, 0), arrowLength, coneHeight, coneRadius, lineWidth);
+            transformHelper.add(yGroup);
+            
+            // Z轴 - 蓝色
+            const zGroup = createTranslateAxis(0x4488ff, 'z', new THREE.Vector3(0, 0, 1), arrowLength, coneHeight, coneRadius, lineWidth);
+            transformHelper.add(zGroup);
+            
+            // 平面正方形的大小和偏移
+            const planeSize = 0.5;
+            const planeOffset = 0.8;  // 从中心到正方形中心的距离
+            
+            // XZ平面（红蓝平面）- 绿色正方形，位于X和Z轴交点处
+            const xzPlane = createTranslatePlane(0x44ff44, 'xz', planeSize);
+            xzPlane.rotation.x = Math.PI / 2;
+            xzPlane.position.set(planeOffset, 0, planeOffset);
+            transformHelper.add(xzPlane);
+            
+            // XY平面（红绿平面）- 蓝色正方形，位于X和Y轴交点处
+            const xyPlane = createTranslatePlane(0x4488ff, 'xy', planeSize);
+            xyPlane.position.set(planeOffset, planeOffset, 0);
+            transformHelper.add(xyPlane);
+            
+            // YZ平面（蓝绿平面）- 红色正方形，位于Y和Z轴交点处
+            const yzPlane = createTranslatePlane(0xff4444, 'yz', planeSize);
+            yzPlane.rotation.y = Math.PI / 2;
+            yzPlane.position.set(0, planeOffset, planeOffset);
+            transformHelper.add(yzPlane);
+            
+            setAlwaysOnTop(transformHelper);
+            transformHelper.visible = true;
+        }
+        
+        function createTranslateAxis(color, axis, direction, length, coneHeight, coneRadius, lineWidth) {
+            const group = new THREE.Group();
+            group.userData.axis = axis;
+            group.userData.type = 'translate';
+            
+            // 圆柱体作为轴线
+            const cylinderGeometry = new THREE.CylinderGeometry(lineWidth, lineWidth, length - coneHeight, 8);
+            const cylinderMaterial = new THREE.MeshBasicMaterial({ color: color, depthTest: false, depthWrite: false });
+            const cylinder = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
+            cylinder.position.copy(direction.clone().multiplyScalar((length - coneHeight) / 2));
+            
+            // 旋转圆柱体使其沿着正确的轴
+            if (axis === 'x') cylinder.rotation.z = -Math.PI / 2;
+            else if (axis === 'z') cylinder.rotation.x = Math.PI / 2;
+            
+            group.add(cylinder);
+            
+            // 圆锥体作为箭头
+            const coneGeometry = new THREE.ConeGeometry(coneRadius, coneHeight, 16);
+            const coneMaterial = new THREE.MeshBasicMaterial({ color: color, depthTest: false, depthWrite: false });
+            const cone = new THREE.Mesh(coneGeometry, coneMaterial);
+            cone.position.copy(direction.clone().multiplyScalar(length - coneHeight / 2));
+            
+            if (axis === 'x') cone.rotation.z = -Math.PI / 2;
+            else if (axis === 'z') cone.rotation.x = Math.PI / 2;
+            
+            group.add(cone);
+            
+            return group;
+        }
+        
+        function createTranslatePlane(color, axes, size) {
+            const geometry = new THREE.PlaneGeometry(size, size);
+            const material = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.4,
+                side: THREE.DoubleSide,
+                depthTest: false,
+                depthWrite: false
+            });
+            const plane = new THREE.Mesh(geometry, material);
+            plane.userData.axes = axes;
+            plane.userData.type = 'translate';
+            return plane;
+        }
+        
+        // 创建旋转控制器
+        function createRotateHelper() {
+            clearTransformHelper();
+            
+            const radius = 2.0;
+            const tubeRadius = 0.04;
+            
+            // X轴旋转环 - 红色
+            const xRing = createRotationRing(0xff4444, 'x', radius, tubeRadius);
+            xRing.rotation.y = Math.PI / 2;
+            transformHelper.add(xRing);
+            
+            // Y轴旋转环 - 绿色
+            const yRing = createRotationRing(0x44ff44, 'y', radius, tubeRadius);
+            yRing.rotation.x = Math.PI / 2;
+            transformHelper.add(yRing);
+            
+            // Z轴旋转环 - 蓝色
+            const zRing = createRotationRing(0x4488ff, 'z', radius, tubeRadius);
+            transformHelper.add(zRing);
+            
+            // 外圈（屏幕空间旋转）- 白色
+            const outerRing = createRotationRing(0xaaaaaa, 'screen', radius * 1.15, tubeRadius * 0.8);
+            transformHelper.add(outerRing);
+            
+            setAlwaysOnTop(transformHelper);
+            transformHelper.visible = true;
+        }
+        
+        function createRotationRing(color, axis, radius, tubeRadius) {
+            const geometry = new THREE.TorusGeometry(radius, tubeRadius, 8, 64);
+            const material = new THREE.MeshBasicMaterial({
+                color: color,
+                transparent: true,
+                opacity: 0.9,
+                depthTest: false,
+                depthWrite: false
+            });
+            const ring = new THREE.Mesh(geometry, material);
+            ring.userData.axis = axis;
+            ring.userData.type = 'rotate';
+            return ring;
+        }
+        
+        // 创建缩放控制器
+        function createScaleHelper() {
+            clearTransformHelper();
+            
+            const lineLength = 2.0;
+            const boxSize = 0.2;
+            const lineWidth = 0.04;
+            
+            // X轴 - 红色
+            const xLine = createScaleAxis(0xff4444, 'x', new THREE.Vector3(1, 0, 0), lineLength, boxSize, lineWidth);
+            transformHelper.add(xLine);
+            
+            // Y轴 - 绿色
+            const yLine = createScaleAxis(0x44ff44, 'y', new THREE.Vector3(0, 1, 0), lineLength, boxSize, lineWidth);
+            transformHelper.add(yLine);
+            
+            // Z轴 - 蓝色
+            const zLine = createScaleAxis(0x4488ff, 'z', new THREE.Vector3(0, 0, 1), lineLength, boxSize, lineWidth);
+            transformHelper.add(zLine);
+            
+            // 中心立方体（统一缩放）
+            const centerGeometry = new THREE.BoxGeometry(boxSize * 1.5, boxSize * 1.5, boxSize * 1.5);
+            const centerMaterial = new THREE.MeshBasicMaterial({
+                color: 0xffffff,
+                transparent: true,
+                opacity: 0.6,
+                depthTest: false,
+                depthWrite: false
+            });
+            const centerBox = new THREE.Mesh(centerGeometry, centerMaterial);
+            centerBox.userData.axis = 'uniform';
+            centerBox.userData.type = 'scale';
+            transformHelper.add(centerBox);
+            
+            setAlwaysOnTop(transformHelper);
+            transformHelper.visible = true;
+        }
+        
+        function createScaleAxis(color, axis, direction, length, boxSize, lineWidth) {
+            const group = new THREE.Group();
+            group.userData.axis = axis;
+            group.userData.type = 'scale';
+            
+            // 圆柱体作为轴线
+            const cylinderGeometry = new THREE.CylinderGeometry(lineWidth, lineWidth, length - boxSize, 8);
+            const cylinderMaterial = new THREE.MeshBasicMaterial({ color: color, depthTest: false, depthWrite: false });
+            const cylinder = new THREE.Mesh(cylinderGeometry, cylinderMaterial);
+            cylinder.position.copy(direction.clone().multiplyScalar((length - boxSize) / 2));
+            
+            if (axis === 'x') cylinder.rotation.z = -Math.PI / 2;
+            else if (axis === 'z') cylinder.rotation.x = Math.PI / 2;
+            
+            group.add(cylinder);
+            
+            // 立方体作为端点
+            const boxGeometry = new THREE.BoxGeometry(boxSize, boxSize, boxSize);
+            const boxMaterial = new THREE.MeshBasicMaterial({ color: color, depthTest: false, depthWrite: false });
+            const box = new THREE.Mesh(boxGeometry, boxMaterial);
+            box.position.copy(direction.clone().multiplyScalar(length - boxSize / 2));
+            group.add(box);
+            
+            return group;
+        }
+        
+        function clearTransformHelper() {
+            while (transformHelper.children.length > 0) {
+                const child = transformHelper.children[0];
+                transformHelper.remove(child);
+                if (child.geometry) child.geometry.dispose();
+                if (child.material) child.material.dispose();
+            }
+            transformHelper.visible = false;
+            isTransforming = false;
+            transformAxis = null;
+        }
+        
+        // 更新变换控制器位置
+        function updateTransformHelperPosition() {
+            if (!selectedModelId || !transformHelper.visible) return;
+            
+            const model = sceneModels.get(selectedModelId);
+            if (model && model.mesh) {
+                // 使用模型的实际位置（而不是边界框中心）
+                transformHelper.position.copy(model.mesh.position);
+                
+                // 同步模型的旋转到控制器
+                transformHelper.rotation.copy(model.mesh.rotation);
+                
+                // 根据相机距离调整控制器大小
+                const distance = camera.position.distanceTo(model.mesh.position);
+                const scale = distance * 0.15;
+                transformHelper.scale.setScalar(Math.max(0.5, Math.min(scale, 3)));
+            }
+        }
+        
+        // 检测变换控制器的点击
+        function checkTransformHelperIntersection(mouseX, mouseY) {
+            if (!transformHelper.visible || !selectedModelId) return null;
+            
+            const rect = renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2(
+                ((mouseX - rect.left) / rect.width) * 2 - 1,
+                -((mouseY - rect.top) / rect.height) * 2 + 1
+            );
+            
+            transformRaycaster.setFromCamera(mouse, camera);
+            
+            const intersects = transformRaycaster.intersectObjects(transformHelper.children, true);
+            
+            if (intersects.length > 0) {
+                // 找到带有axis或axes属性的对象
+                let obj = intersects[0].object;
+                while (obj && !obj.userData.axis && !obj.userData.axes && obj.parent !== transformHelper) {
+                    obj = obj.parent;
+                }
+                if (obj && (obj.userData.axis || obj.userData.axes)) {
+                    return { axis: obj.userData.axis, axes: obj.userData.axes, point: intersects[0].point };
+                }
+            }
+            return null;
+        }
+        
+        // 开始变换
+        function startTransform(axis, axes, point, mouseX, mouseY) {
+            if (!selectedModelId) return;
+            
+            isTransforming = true;
+            transformAxis = axis || axes;
+            transformStartPoint.copy(point);
+            
+            const model = sceneModels.get(selectedModelId);
+            if (model) {
+                if (transformMode === 'translate') {
+                    transformStartValue = { x: model.position.x, y: model.position.y, z: model.position.z };
+                } else if (transformMode === 'rotate') {
+                    transformStartValue = { x: model.rotation.x, y: model.rotation.y, z: model.rotation.z };
+                    transformStartRotation.copy(model.mesh.rotation);
+                    
+                    // 保存起始鼠标位置（用于trackball旋转）
+                    const rect = renderer.domElement.getBoundingClientRect();
+                    transformStartMouse.set(
+                        ((mouseX - rect.left) / rect.width) * 2 - 1,
+                        -((mouseY - rect.top) / rect.height) * 2 + 1
+                    );
+                } else if (transformMode === 'scale') {
+                    transformStartValue = model.scale;
+                }
+            }
+            
+            // 设置变换平面
+            const normal = new THREE.Vector3();
+            const cameraDir = new THREE.Vector3();
+            camera.getWorldDirection(cameraDir);
+            
+            if (transformMode === 'translate') {
+                if (axis === 'x') {
+                    // X轴移动：选择与相机视线最垂直的平面（Y或Z）
+                    normal.set(0, Math.abs(cameraDir.y) > Math.abs(cameraDir.z) ? 0 : 1, 
+                               Math.abs(cameraDir.y) > Math.abs(cameraDir.z) ? 1 : 0);
+                } else if (axis === 'y') {
+                    // Y轴移动：选择与相机视线最垂直的平面（X或Z）
+                    normal.set(Math.abs(cameraDir.x) > Math.abs(cameraDir.z) ? 0 : 1, 0,
+                               Math.abs(cameraDir.x) > Math.abs(cameraDir.z) ? 1 : 0);
+                } else if (axis === 'z') {
+                    // Z轴移动：选择与相机视线最垂直的平面（X或Y）
+                    normal.set(Math.abs(cameraDir.x) > Math.abs(cameraDir.y) ? 0 : 1,
+                               Math.abs(cameraDir.x) > Math.abs(cameraDir.y) ? 1 : 0, 0);
+                } else if (axes === 'xy') {
+                    // XY平面（红绿平面）- 蓝色正方形
+                    normal.set(0, 0, 1);
+                } else if (axes === 'xz') {
+                    // XZ平面（红蓝平面）- 绿色正方形
+                    normal.set(0, 1, 0);
+                } else if (axes === 'yz') {
+                    // YZ平面（蓝绿平面）- 红色正方形
+                    normal.set(1, 0, 0);
+                }
+            } else if (transformMode === 'rotate') {
+                // 旋转模式：根据轴设置平面
+                if (axis === 'x') {
+                    normal.set(1, 0, 0);
+                } else if (axis === 'y') {
+                    normal.set(0, 1, 0);
+                } else if (axis === 'z') {
+                    normal.set(0, 0, 1);
+                } else if (axis === 'screen') {
+                    // 自由旋转（trackball）：使用面向相机的平面
+                    normal.copy(cameraDir);
+                }
+            } else {
+                // 对于缩放，使用面向相机的平面
+                normal.copy(cameraDir);
+            }
+            
+            transformPlane.setFromNormalAndCoplanarPoint(normal, transformHelper.position);
+            
+            // 禁用轨道控制
+            renderer.domElement.style.cursor = 'grabbing';
+        }
+        
+        // 更新变换
+        function updateTransform(mouseX, mouseY) {
+            if (!isTransforming || !selectedModelId || !transformAxis) return;
+            
+            const rect = renderer.domElement.getBoundingClientRect();
+            const mouse = new THREE.Vector2(
+                ((mouseX - rect.left) / rect.width) * 2 - 1,
+                -((mouseY - rect.top) / rect.height) * 2 + 1
+            );
+            
+            transformRaycaster.setFromCamera(mouse, camera);
+            
+            const intersectPoint = new THREE.Vector3();
+            if (!transformRaycaster.ray.intersectPlane(transformPlane, intersectPoint)) return;
+            
+            const delta = intersectPoint.clone().sub(transformStartPoint);
+            const model = sceneModels.get(selectedModelId);
+            if (!model || !model.mesh) return;
+            
+            if (transformMode === 'translate') {
+                // 移动模式：根据轴向约束delta
+                if (transformAxis === 'x') {
+                    model.position.x = transformStartValue.x + delta.x;
+                    model.position.y = transformStartValue.y;
+                    model.position.z = transformStartValue.z;
+                } else if (transformAxis === 'y') {
+                    model.position.x = transformStartValue.x;
+                    model.position.y = transformStartValue.y + delta.y;
+                    model.position.z = transformStartValue.z;
+                } else if (transformAxis === 'z') {
+                    model.position.x = transformStartValue.x;
+                    model.position.y = transformStartValue.y;
+                    model.position.z = transformStartValue.z + delta.z;
+                } else if (transformAxis === 'xy') {
+                    model.position.x = transformStartValue.x + delta.x;
+                    model.position.y = transformStartValue.y + delta.y;
+                    model.position.z = transformStartValue.z;
+                } else if (transformAxis === 'xz') {
+                    model.position.x = transformStartValue.x + delta.x;
+                    model.position.y = transformStartValue.y;
+                    model.position.z = transformStartValue.z + delta.z;
+                } else if (transformAxis === 'yz') {
+                    model.position.x = transformStartValue.x;
+                    model.position.y = transformStartValue.y + delta.y;
+                    model.position.z = transformStartValue.z + delta.z;
+                }
+                model.mesh.position.set(model.position.x, model.position.y, model.position.z);
+            } else if (transformMode === 'rotate') {
+                if (transformAxis === 'screen') {
+                    // 自由旋转（trackball模式）
+                    const currentMouse = new THREE.Vector2(
+                        ((mouseX - rect.left) / rect.width) * 2 - 1,
+                        -((mouseY - rect.top) / rect.height) * 2 + 1
+                    );
+                    
+                    const deltaX = currentMouse.x - transformStartMouse.x;
+                    const deltaY = currentMouse.y - transformStartMouse.y;
+                    
+                    // 计算旋转轴（垂直于鼠标移动方向）
+                    const rotationAxis = new THREE.Vector3(-deltaY, deltaX, 0).normalize();
+                    const rotationAngle = Math.sqrt(deltaX * deltaX + deltaY * deltaY) * Math.PI * 2;
+                    
+                    // 将旋转轴转换到世界空间
+                    const cameraRotation = new THREE.Matrix4().extractRotation(camera.matrixWorld);
+                    rotationAxis.applyMatrix4(cameraRotation);
+                    
+                    // 应用旋转
+                    const quaternion = new THREE.Quaternion().setFromAxisAngle(rotationAxis, rotationAngle);
+                    const startQuaternion = new THREE.Quaternion().setFromEuler(transformStartRotation);
+                    const newQuaternion = quaternion.multiply(startQuaternion);
+                    
+                    model.mesh.quaternion.copy(newQuaternion);
+                    model.rotation.x = model.mesh.rotation.x;
+                    model.rotation.y = model.mesh.rotation.y;
+                    model.rotation.z = model.mesh.rotation.z;
+                } else {
+                    // 约束旋转（绕单个轴）
+                    // 计算鼠标在旋转平面上的投影
+                    const currentPoint = new THREE.Vector3();
+                    if (transformRaycaster.ray.intersectPlane(transformPlane, currentPoint)) {
+                        // 计算从中心到起始点和当前点的向量
+                        const center = transformHelper.position;
+                        const startVec = transformStartPoint.clone().sub(center).normalize();
+                        const currentVec = currentPoint.clone().sub(center).normalize();
+                        
+                        // 计算旋转角度
+                        let angle = Math.acos(Math.max(-1, Math.min(1, startVec.dot(currentVec))));
+                        
+                        // 确定旋转方向
+                        const axis = new THREE.Vector3();
+                        if (transformAxis === 'x') axis.set(1, 0, 0);
+                        else if (transformAxis === 'y') axis.set(0, 1, 0);
+                        else if (transformAxis === 'z') axis.set(0, 0, 1);
+                        
+                        const cross = new THREE.Vector3().crossVectors(startVec, currentVec);
+                        if (cross.dot(axis) < 0) angle = -angle;
+                        
+                        // 应用旋转
+                        if (transformAxis === 'x') {
+                            model.rotation.x = transformStartValue.x + angle;
+                        } else if (transformAxis === 'y') {
+                            model.rotation.y = transformStartValue.y + angle;
+                        } else if (transformAxis === 'z') {
+                            model.rotation.z = transformStartValue.z + angle;
+                        }
+                        
+                        model.mesh.rotation.set(model.rotation.x, model.rotation.y, model.rotation.z);
+                    }
+                }
+            } else if (transformMode === 'scale') {
+                // 缩放模式：使用距离变化来计算缩放
+                const startDist = transformStartPoint.distanceTo(transformHelper.position);
+                const currentDist = intersectPoint.distanceTo(transformHelper.position);
+                const scaleFactor = startDist > 0.001 ? currentDist / startDist : 1;
+                
+                if (transformAxis === 'uniform' || transformAxis === 'x' || transformAxis === 'y' || transformAxis === 'z') {
+                    model.scale = Math.max(0.01, transformStartValue * scaleFactor);
+                    model.mesh.scale.setScalar(model.scale);
+                }
+            }
+            
+            updateTransformInputs();
+            updateTransformHelperPosition();
+        }
+        
+        // 结束变换
+        function endTransform() {
+            if (isTransforming && selectedModelId) {
+                const model = sceneModels.get(selectedModelId);
+                if (model) {
+                    sendToPython({
+                        type: 'modelTransformed',
+                        data: {
+                            id: selectedModelId,
+                            position: model.position,
+                            rotation: model.rotation,
+                            scale: model.scale
+                        }
+                    });
+                }
+            }
+            isTransforming = false;
+            transformAxis = null;
+            
+            // 恢复光标
+            renderer.domElement.style.cursor = 'default';
+        }
+
+        // 初始化坐标轴指示器
+        function initAxisIndicator() {
+            const canvas = document.getElementById('axis-canvas');
+            
+            axisScene = new THREE.Scene();
+            axisCamera = new THREE.PerspectiveCamera(50, 1, 0.1, 100);
+            axisCamera.position.set(0, 0, 3);
+            
+            axisRenderer = new THREE.WebGLRenderer({ canvas: canvas, alpha: true, antialias: true });
+            axisRenderer.setSize(100, 100);
+            axisRenderer.setClearColor(0x000000, 0);
+            
+            // 创建坐标轴
+            const axisLength = 0.8;
+            
+            // X轴 - 红色
+            const xAxis = createAxisArrow(0xff4444, new THREE.Vector3(axisLength, 0, 0), 'X');
+            axisScene.add(xAxis);
+            
+            // Y轴 - 绿色
+            const yAxis = createAxisArrow(0x44ff44, new THREE.Vector3(0, axisLength, 0), 'Y');
+            axisScene.add(yAxis);
+            
+            // Z轴 - 蓝色
+            const zAxis = createAxisArrow(0x4488ff, new THREE.Vector3(0, 0, axisLength), 'Z');
+            axisScene.add(zAxis);
+        }
+        
+        function createAxisArrow(color, direction, label) {
+            const group = new THREE.Group();
+            
+            // 轴线
+            const lineGeometry = new THREE.BufferGeometry().setFromPoints([
+                new THREE.Vector3(0, 0, 0),
+                direction
+            ]);
+            const lineMaterial = new THREE.LineBasicMaterial({ color: color, linewidth: 2 });
+            const line = new THREE.Line(lineGeometry, lineMaterial);
+            group.add(line);
+            
+            // 箭头
+            const arrowGeometry = new THREE.ConeGeometry(0.08, 0.2, 8);
+            const arrowMaterial = new THREE.MeshBasicMaterial({ color: color });
+            const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
+            arrow.position.copy(direction);
+            
+            if (direction.x !== 0) arrow.rotation.z = -Math.PI / 2;
+            else if (direction.z !== 0) arrow.rotation.x = Math.PI / 2;
+            
+            group.add(arrow);
+            
+            return group;
+        }
+        
+        function updateAxisIndicator() {
+            if (!axisCamera || !camera) return;
+            
+            const quaternion = camera.quaternion.clone();
+            axisCamera.position.set(0, 0, 3);
+            axisCamera.position.applyQuaternion(quaternion.invert());
+            axisCamera.lookAt(0, 0, 0);
+            
+            axisRenderer.render(axisScene, axisCamera);
+        }
+    </script>
+
+    <script>
+        // ==================== 场景管理器 ====================
+        function addModel(url, name, type = 'splat') {
+            const id = 'model_' + (++modelIdCounter);
+            
+            const modelData = {
+                id: id,
+                name: name || `模型 ${modelIdCounter}`,
+                type: type,
+                url: url,
+                visible: true,
+                position: { x: 0, y: 0, z: 0 },
+                rotation: { x: 0, y: 0, z: 0 },
+                scale: 1,
+                viewer: null,
+                mesh: null,
+                pointCount: 0
+            };
+            
+            sceneModels.set(id, modelData);
+            updateModelList();
+            
+            return id;
+        }
+        
+        function loadModelToScene(id, url) {
+            const modelData = sceneModels.get(id);
+            if (!modelData) return;
+            
+            showLoading('正在加载模型...');
+            
+            // 加载3DGS模型
+            if (typeof GaussianSplats3D !== 'undefined') {
+                const splatConfig = {
+                    selfDrivenMode: false,
+                    renderer: renderer,
+                    camera: camera,
+                    useBuiltInControls: false,
+                    ignoreDevicePixelRatio: true,
+                    gpuAcceleratedSort: false,
+                    sharedMemoryForWorkers: false,
+                    enableSIMDInSort: false,
+                    integerBasedSort: false,
+                    halfPrecisionCovariancesOnGPU: false,
+                    dynamicScene: false,
+                    sceneRevealMode: GaussianSplats3D.SceneRevealMode ? GaussianSplats3D.SceneRevealMode.Instant : 0,
+                    logLevel: GaussianSplats3D.LogLevel ? GaussianSplats3D.LogLevel.None : 0,
+                    sphericalHarmonicsDegree: 0
+                };
+                
+                const viewer = new GaussianSplats3D.Viewer(splatConfig);
+                
+                viewer.addSplatScene(url, {
+                    splatAlphaRemovalThreshold: 1,
+                    showLoadingUI: false,
+                    position: [modelData.position.x, modelData.position.y, modelData.position.z],
+                    rotation: [0, 0, 0, 1],
+                    scale: [modelData.scale, modelData.scale, modelData.scale]
+                }).then(() => {
+                    modelData.viewer = viewer;
+                    modelData.mesh = viewer.splatMesh;
+                    
+                    // 延迟获取点数，确保模型完全加载
+                    const tryGetSplatCount = () => {
+                        if (viewer.getSplatCount) {
+                            const count = viewer.getSplatCount();
+                            if (count > 0) {
+                                modelData.pointCount = count;
+                                updateModelList();
+                                updatePointCount();
+                                console.log(`[ThreeJS Info] 模型 ${modelData.name} 点数: ${count}`);
+                                return;
+                            }
+                        }
+                        // 如果点数为0，稍后重试
+                        setTimeout(tryGetSplatCount, 100);
+                    };
+                    
+                    // 先设置初始值，然后尝试获取真实点数
+                    modelData.pointCount = viewer.getSplatCount ? viewer.getSplatCount() : 0;
+                    setTimeout(tryGetSplatCount, 200);
+                    
+                    scene.add(viewer.splatMesh);
+                    
+                    hideLoading();
+                    updateModelList();
+                    updatePointCount();
+                    
+                    // 自动选中新加载的模型
+                    selectModel(id);
+                    
+                    sendToPython({
+                        type: 'modelLoaded',
+                        success: true,
+                        data: { id: id, pointCount: modelData.pointCount }
+                    });
+                }).catch(error => {
+                    console.error('[ThreeJS Error] 加载模型失败:', error);
+                    hideLoading();
+                    sceneModels.delete(id);
+                    updateModelList();
+                    
+                    sendToPython({
+                        type: 'modelLoaded',
+                        success: false,
+                        error: error.message
+                    });
+                });
+            }
+        }
+        
+        function selectModel(id) {
+            selectedModelId = id;
+            
+            // 更新UI
+            document.querySelectorAll('.model-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            const modelItem = document.querySelector(`[data-model-id="${id}"]`);
+            if (modelItem) {
+                modelItem.classList.add('selected');
+            }
+            
+            // 显示变换面板
+            const transformPanel = document.getElementById('transform-panel');
+            if (id) {
+                transformPanel.style.display = 'block';
+                updateTransformInputs();
+                
+                // 如果有变换模式，显示控制器
+                if (transformMode) {
+                    updateTransformHelperPosition();
+                }
+            } else {
+                transformPanel.style.display = 'none';
+                clearTransformHelper();
+            }
+            
+            sendToPython({
+                type: 'modelSelected',
+                data: { id: id }
+            });
+        }
+        
+        function deselectAll() {
+            selectedModelId = null;
+            selectedPointIndices.clear();
+            
+            document.querySelectorAll('.model-item').forEach(item => {
+                item.classList.remove('selected');
+            });
+            
+            document.getElementById('transform-panel').style.display = 'none';
+            clearTransformHelper();
+            
+            // 清除高亮
+            if (highlightMesh) {
+                scene.remove(highlightMesh);
+                if (highlightMesh.geometry) highlightMesh.geometry.dispose();
+                if (highlightMesh.material) highlightMesh.material.dispose();
+                highlightMesh = null;
+            }
+            
+            updateSelectionDisplay();
+            
+            sendToPython({ type: 'deselected' });
+        }
+        
+        function toggleModelVisibility(id) {
+            const model = sceneModels.get(id);
+            if (!model) return;
+            
+            model.visible = !model.visible;
+            
+            if (model.mesh) {
+                model.mesh.visible = model.visible;
+            }
+            
+            updateModelList();
+        }
+        
+        function deleteModel(id) {
+            const model = sceneModels.get(id);
+            if (!model) return;
+            
+            if (model.mesh) {
+                scene.remove(model.mesh);
+            }
+            
+            if (model.viewer && model.viewer.dispose) {
+                model.viewer.dispose();
+            }
+            
+            sceneModels.delete(id);
+            
+            if (selectedModelId === id) {
+                deselectAll();
+            }
+            
+            updateModelList();
+            updatePointCount();
+            
+            sendToPython({
+                type: 'modelDeleted',
+                data: { id: id }
+            });
+        }
+        
+        function updateModelList() {
+            const listContainer = document.getElementById('model-list');
+            
+            if (sceneModels.size === 0) {
+                listContainer.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <div class="empty-state-text">暂无模型<br>点击 ➕ 添加模型</div>
+                    </div>
+                `;
+                return;
+            }
+            
+            let html = '';
+            sceneModels.forEach((model, id) => {
+                const isSelected = id === selectedModelId;
+                const visibilityIcon = model.visible ? '👁️' : '👁️‍🗨️';
+                const visibilityClass = model.visible ? '' : 'hidden-state';
+                
+                html += `
+                    <div class="model-item ${isSelected ? 'selected' : ''}" data-model-id="${id}" onclick="selectModel('${id}')">
+                        <div class="model-item-icon">🎨</div>
+                        <div class="model-item-info">
+                            <div class="model-item-name">${model.name}</div>
+                        </div>
+                        <div class="model-item-actions">
+                            <button class="model-action-btn ${visibilityClass}" onclick="event.stopPropagation(); toggleModelVisibility('${id}')" title="显示/隐藏">
+                                ${visibilityIcon}
+                            </button>
+                            <button class="model-action-btn delete" onclick="event.stopPropagation(); confirmDeleteModel('${id}')" title="删除">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            listContainer.innerHTML = html;
+        }
+        
+        function confirmDeleteModel(id) {
+            const model = sceneModels.get(id);
+            if (!model) return;
+            
+            if (confirm(`确定要删除模型 "${model.name}" 吗？`)) {
+                deleteModel(id);
+            }
+        }
+        
+        function addModelDialog() {
+            sendToPython({ type: 'requestAddModel' });
+        }
+        
+        function focusSelected() {
+            if (!selectedModelId) return;
+            
+            const model = sceneModels.get(selectedModelId);
+            if (!model || !model.mesh) return;
+            
+            const box = new THREE.Box3().setFromObject(model.mesh);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            
+            target.copy(center);
+            spherical.radius = Math.max(size.x, size.y, size.z) * 2;
+            
+            updateCameraPosition();
+        }
+        
+        function updateTransformInputs() {
+            if (!selectedModelId) return;
+            
+            const model = sceneModels.get(selectedModelId);
+            if (!model) return;
+            
+            document.getElementById('pos-x').value = model.position.x.toFixed(3);
+            document.getElementById('pos-y').value = model.position.y.toFixed(3);
+            document.getElementById('pos-z').value = model.position.z.toFixed(3);
+            
+            document.getElementById('rot-x').value = (model.rotation.x * 180 / Math.PI).toFixed(2);
+            document.getElementById('rot-y').value = (model.rotation.y * 180 / Math.PI).toFixed(2);
+            document.getElementById('rot-z').value = (model.rotation.z * 180 / Math.PI).toFixed(2);
+            
+            document.getElementById('scale-uniform').value = model.scale.toFixed(3);
+        }
+        
+        function updateTransformFromInput(type) {
+            if (!selectedModelId) return;
+            
+            const model = sceneModels.get(selectedModelId);
+            if (!model || !model.mesh) return;
+            
+            if (type === 'position') {
+                model.position.x = parseFloat(document.getElementById('pos-x').value) || 0;
+                model.position.y = parseFloat(document.getElementById('pos-y').value) || 0;
+                model.position.z = parseFloat(document.getElementById('pos-z').value) || 0;
+                
+                model.mesh.position.set(model.position.x, model.position.y, model.position.z);
+            } else if (type === 'rotation') {
+                model.rotation.x = (parseFloat(document.getElementById('rot-x').value) || 0) * Math.PI / 180;
+                model.rotation.y = (parseFloat(document.getElementById('rot-y').value) || 0) * Math.PI / 180;
+                model.rotation.z = (parseFloat(document.getElementById('rot-z').value) || 0) * Math.PI / 180;
+                
+                model.mesh.rotation.set(model.rotation.x, model.rotation.y, model.rotation.z);
+            } else if (type === 'scale') {
+                model.scale = parseFloat(document.getElementById('scale-uniform').value) || 1;
+                model.mesh.scale.setScalar(model.scale);
+            }
+            
+            updateTransformHelperPosition();
+            
+            sendToPython({
+                type: 'modelTransformed',
+                data: {
+                    id: selectedModelId,
+                    position: model.position,
+                    rotation: model.rotation,
+                    scale: model.scale
+                }
+            });
+        }
+        
+        function formatNumber(num) {
+            if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
+            if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
+            return num.toString();
+        }
+        
+        function togglePanel(panelId) {
+            const content = document.getElementById(panelId + '-content');
+            if (content) {
+                content.style.display = content.style.display === 'none' ? 'block' : 'none';
+            }
+        }
+
+        // ==================== 事件监听 ====================
+        function setupEventListeners() {
+            renderer.domElement.addEventListener('mousedown', onMouseDown);
+            renderer.domElement.addEventListener('mousemove', onMouseMove);
+            renderer.domElement.addEventListener('mouseup', onMouseUp);
+            renderer.domElement.addEventListener('wheel', onMouseWheel);
+            renderer.domElement.addEventListener('contextmenu', (e) => e.preventDefault());
+            
+            document.addEventListener('keydown', onKeyDown);
+            document.addEventListener('keyup', onKeyUp);
+        }
+        
+        function onMouseDown(e) {
+            const rect = renderer.domElement.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // 首先检查是否点击了变换控制器
+            if (transformMode && transformHelper.visible && e.button === 0) {
+                const hit = checkTransformHelperIntersection(e.clientX, e.clientY);
+                if (hit) {
+                    startTransform(hit.axis, hit.axes, hit.point, e.clientX, e.clientY);
+                    return;
+                }
+            }
+            
+            if (currentTool === 'move' || e.button === 2 || e.button === 1) {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            } else if (currentTool === 'box' || currentTool === 'lasso' || currentTool === 'brush') {
+                if (e.button === 0) {
+                    isSelecting = true;
+                    selectionStart = { x, y };
+                    selectionPath = [{ x, y }];
+                    
+                    if (currentTool === 'box') {
+                        createSelectionBox(x, y, 0, 0);
+                    }
+                }
+            }
+        }
+        
+        let lastMouseMoveTime = 0;
+        const MOUSE_MOVE_THROTTLE = 8;
+        
+        function onMouseMove(e) {
+            const now = performance.now();
+            
+            if (now - lastMouseMoveTime < MOUSE_MOVE_THROTTLE && !isDragging && !isTransforming) {
+                return;
+            }
+            lastMouseMoveTime = now;
+            
+            const rect = renderer.domElement.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            
+            // 处理变换控制器拖拽
+            if (isTransforming) {
+                updateTransform(e.clientX, e.clientY);
+                return;
+            }
+            
+            // 更新笔刷光标
+            if (currentTool === 'brush') {
+                const cursor = document.getElementById('brush-cursor');
+                cursor.style.display = 'block';
+                cursor.style.transform = `translate(${e.clientX - brushSize}px, ${e.clientY - brushSize}px)`;
+                cursor.style.width = (brushSize * 2) + 'px';
+                cursor.style.height = (brushSize * 2) + 'px';
+            } else {
+                document.getElementById('brush-cursor').style.display = 'none';
+            }
+            
+            // 高亮变换控制器
+            if (transformMode && transformHelper.visible && !isDragging && !isSelecting) {
+                const hit = checkTransformHelperIntersection(e.clientX, e.clientY);
+                highlightTransformAxis(hit ? (hit.axis || hit.axes) : null);
+            }
+            
+            if (isDragging) {
+                const deltaX = e.clientX - previousMousePosition.x;
+                const deltaY = e.clientY - previousMousePosition.y;
+                
+                if (e.buttons === 2 || (e.buttons === 1 && currentTool === 'move')) {
+                    spherical.theta -= deltaX * 0.01;
+                    spherical.phi = Math.max(0.01, Math.min(Math.PI - 0.01, spherical.phi + deltaY * 0.01));
+                } else if (e.buttons === 4) {
+                    const right = new THREE.Vector3();
+                    const up = new THREE.Vector3();
+                    camera.getWorldDirection(up);
+                    right.crossVectors(up, camera.up).normalize();
+                    up.crossVectors(right, camera.getWorldDirection(new THREE.Vector3())).normalize();
+                    
+                    target.add(right.multiplyScalar(-deltaX * 0.01));
+                    target.add(up.multiplyScalar(deltaY * 0.01));
+                }
+                
+                updateCameraPosition();
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            } else if (isSelecting) {
+                if (currentTool === 'box') {
+                    const width = x - selectionStart.x;
+                    const height = y - selectionStart.y;
+                    updateSelectionBox(selectionStart.x, selectionStart.y, width, height);
+                } else if (currentTool === 'lasso' || currentTool === 'brush') {
+                    const lastPoint = selectionPath[selectionPath.length - 1];
+                    const dist = Math.sqrt((x - lastPoint.x) ** 2 + (y - lastPoint.y) ** 2);
+                    if (dist > 3) {
+                        selectionPath.push({ x, y });
+                        drawSelectionPath();
+                    }
+                }
+            }
+        }
+        
+        // 高亮变换控制器的轴
+        let highlightedAxis = null;
+        function highlightTransformAxis(axis) {
+            if (highlightedAxis === axis) return;
+            highlightedAxis = axis;
+            
+            transformHelper.traverse((child) => {
+                if (child.material && (child.userData.axis || child.userData.axes)) {
+                    const isHighlighted = child.userData.axis === axis || child.userData.axes === axis;
+                    if (isHighlighted) {
+                        child.material.opacity = 1.0;
+                        if (child.material.emissive) {
+                            child.material.emissive.setHex(0x333333);
+                        }
+                    } else {
+                        child.material.opacity = child.userData.type === 'rotate' ? 0.9 : 
+                                                  (child.userData.axes ? 0.4 : 0.9);
+                    }
+                }
+            });
+            
+            // 更新光标
+            if (axis) {
+                renderer.domElement.style.cursor = 'grab';
+            } else if (transformMode) {
+                renderer.domElement.style.cursor = 'default';
+            }
+        }
+        
+        function onMouseUp(e) {
+            // 结束变换
+            if (isTransforming) {
+                endTransform();
+                return;
+            }
+            
+            if (isDragging) {
+                isDragging = false;
+            }
+            
+            if (isSelecting) {
+                isSelecting = false;
+                
+                const shiftKey = e.shiftKey;
+                const ctrlKey = e.ctrlKey;
+                
+                if (currentTool === 'box') {
+                    const rect = renderer.domElement.getBoundingClientRect();
+                    const x = e.clientX - rect.left;
+                    const y = e.clientY - rect.top;
+                    selectByBox(selectionStart.x, selectionStart.y, x, y, shiftKey, ctrlKey);
+                } else if (currentTool === 'lasso') {
+                    selectByLasso(selectionPath, shiftKey, ctrlKey);
+                } else if (currentTool === 'brush') {
+                    selectByBrush(selectionPath, brushSize, shiftKey, ctrlKey);
+                }
+                
+                clearSelectionOverlay();
+            }
+        }
+        
+        function onMouseWheel(e) {
+            e.preventDefault();
+            spherical.radius *= e.deltaY > 0 ? 1.1 : 0.9;
+            spherical.radius = Math.max(1, Math.min(100, spherical.radius));
+            updateCameraPosition();
+        }
+        
+        function onKeyDown(e) {
+            if (e.ctrlKey || e.metaKey) {
+                switch (e.key.toLowerCase()) {
+                    case 'a':
+                        e.preventDefault();
+                        selectAll();
+                        break;
+                    case 'i':
+                        e.preventDefault();
+                        selectInverse();
+                        break;
+                    case 'z':
+                        e.preventDefault();
+                        undo();
+                        break;
+                    case 'y':
+                        e.preventDefault();
+                        redo();
+                        break;
+                }
+            } else if (e.shiftKey) {
+                switch (e.key.toLowerCase()) {
+                    case 'h':
+                        e.preventDefault();
+                        showAll();
+                        break;
+                }
+            } else {
+                switch (e.key.toLowerCase()) {
+                    case 'q':
+                        setTool('select');
+                        break;
+                    case 'b':
+                        setTool('box');
+                        break;
+                    case 'l':
+                        setTool('lasso');
+                        break;
+                    case 'p':
+                        setTool('brush');
+                        break;
+                    case 'v':
+                        setTool('move');
+                        break;
+                    case 'h':
+                        hideSelected();
+                        break;
+                    case 'g':
+                        setTransformMode('translate');
+                        break;
+                    case 'r':
+                        setTransformMode('rotate');
+                        break;
+                    case 's':
+                        if (!e.ctrlKey) setTransformMode('scale');
+                        break;
+                    case 'delete':
+                    case 'backspace':
+                        deleteSelected();
+                        break;
+                    case 'escape':
+                        deselectAll();
+                        break;
+                }
+            }
+        }
+        
+        function onKeyUp(e) {}
+        
+        function onWindowResize() {
+            const container = document.getElementById('container');
+            camera.aspect = container.clientWidth / container.clientHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(container.clientWidth, container.clientHeight);
+        }
+        
+        // ==================== 相机控制 ====================
+        function updateCameraPosition() {
+            camera.position.x = target.x + spherical.radius * Math.sin(spherical.phi) * Math.cos(spherical.theta);
+            camera.position.y = target.y + spherical.radius * Math.cos(spherical.phi);
+            camera.position.z = target.z + spherical.radius * Math.sin(spherical.phi) * Math.sin(spherical.theta);
+            camera.lookAt(target);
+            
+        }
+        
+        function resetCamera() {
+            spherical = { radius: 15, phi: Math.PI / 4, theta: 0 };
+            target = new THREE.Vector3(0, 0, 0);
+            updateCameraPosition();
+        }
+        
+        // ==================== 工具切换 ====================
+        function setTool(tool) {
+            currentTool = tool;
+            
+            // 清除变换模式
+            if (tool !== 'select') {
+                transformMode = null;
+                clearTransformHelper();
+            }
+            
+            // 更新UI
+            document.querySelectorAll('#right-toolbar .tool-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            const toolMap = {
+                'select': 'tool-select',
+                'move': 'tool-move-view',
+                'box': 'tool-box',
+                'lasso': 'tool-lasso',
+                'brush': 'tool-brush'
+            };
+            
+            const toolBtn = document.getElementById(toolMap[tool]);
+            if (toolBtn) toolBtn.classList.add('active');
+            
+            // 更新光标
+            if (tool === 'move') {
+                renderer.domElement.style.cursor = 'grab';
+            } else if (tool === 'brush') {
+                renderer.domElement.style.cursor = 'none';
+            } else if (tool === 'select') {
+                renderer.domElement.style.cursor = 'default';
+            } else {
+                renderer.domElement.style.cursor = 'crosshair';
+            }
+            
+            if (tool !== 'brush') {
+                document.getElementById('brush-cursor').style.display = 'none';
+            }
+        }
+        
+        function setTransformMode(mode) {
+            if (!selectedModelId) {
+                showTransformModeIndicator('请先选择一个模型');
+                return;
+            }
+            
+            // 切换模式
+            if (transformMode === mode) {
+                transformMode = null;
+                clearTransformHelper();
+                
+                document.querySelectorAll('#right-toolbar .tool-btn').forEach(btn => {
+                    if (btn.id.startsWith('tool-translate') || btn.id.startsWith('tool-rotate') || btn.id.startsWith('tool-scale')) {
+                        btn.classList.remove('active');
+                    }
+                });
+                return;
+            }
+            
+            transformMode = mode;
+            
+            // 更新UI
+            document.querySelectorAll('#right-toolbar .tool-btn').forEach(btn => {
+                if (btn.id.startsWith('tool-translate') || btn.id.startsWith('tool-rotate') || btn.id.startsWith('tool-scale')) {
+                    btn.classList.remove('active');
+                }
+            });
+            
+            const modeBtn = document.getElementById('tool-' + mode);
+            if (modeBtn) modeBtn.classList.add('active');
+            
+            // 创建对应的控制器
+            if (mode === 'translate') {
+                createTranslateHelper();
+                showTransformModeIndicator('移动模式 (G)');
+            } else if (mode === 'rotate') {
+                createRotateHelper();
+                showTransformModeIndicator('旋转模式 (R)');
+            } else if (mode === 'scale') {
+                createScaleHelper();
+                showTransformModeIndicator('缩放模式 (S)');
+            }
+            
+            updateTransformHelperPosition();
+            
+            sendToPython({
+                type: 'transformModeChanged',
+                data: { mode: mode }
+            });
+        }
+        
+        function showTransformModeIndicator(text) {
+            const indicator = document.getElementById('transform-mode-indicator');
+            indicator.textContent = text;
+            indicator.classList.remove('visible');
+            void indicator.offsetWidth; // 触发重排
+            indicator.classList.add('visible');
+            
+            setTimeout(() => {
+                indicator.classList.remove('visible');
+            }, 2000);
+        }
+
+        // ==================== 渲染模式 ====================
+        function setRenderMode(mode) {
+            renderMode = mode;
+            
+            sendToPython({
+                type: 'renderModeChanged',
+                data: { mode: mode }
+            });
+            
+            updateRenderMode();
+        }
+        
+        function updateRenderMode() {
+            sceneModels.forEach((model, id) => {
+                if (model.viewer && model.viewer.splatMesh) {
+                    if (renderMode === 'splat') {
+                        model.viewer.splatMesh.visible = model.visible;
+                        if (pointCloudMesh) pointCloudMesh.visible = false;
+                    } else {
+                        model.viewer.splatMesh.visible = false;
+                        if (pointCloudMesh) pointCloudMesh.visible = model.visible;
+                    }
+                }
+            });
+            
+            // 点云叠加
+            if (pointCloudOverlayMesh) {
+                pointCloudOverlayMesh.visible = showPointCloudOverlay && renderMode === 'splat';
+            }
+        }
+        
+        function togglePointCloudOverlay(checked) {
+            showPointCloudOverlay = checked;
+            
+            if (checked && renderMode === 'splat') {
+                // 请求Python端发送点云数据用于叠加显示
+                sendToPython({
+                    type: 'requestPointCloudOverlay',
+                    data: {}
+                });
+            }
+            
+            if (pointCloudOverlayMesh) {
+                pointCloudOverlayMesh.visible = checked && renderMode === 'splat';
+            }
+        }
+        
+        function createPointCloudOverlay(data) {
+            const positions = data.positions;
+            const colors = data.colors;
+            
+            if (!positions || positions.length === 0) return;
+            
+            // 移除旧的叠加点云
+            if (pointCloudOverlayMesh) {
+                scene.remove(pointCloudOverlayMesh);
+                if (pointCloudOverlayMesh.geometry) pointCloudOverlayMesh.geometry.dispose();
+                if (pointCloudOverlayMesh.material) pointCloudOverlayMesh.material.dispose();
+                pointCloudOverlayMesh = null;
+            }
+            
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            
+            if (colors && colors.length > 0) {
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+            }
+            
+            const material = new THREE.PointsMaterial({
+                size: 2,
+                vertexColors: colors && colors.length > 0,
+                color: colors && colors.length > 0 ? undefined : 0x00ff00,
+                transparent: true,
+                opacity: 0.6,
+                sizeAttenuation: false,
+                depthTest: true,
+                depthWrite: false
+            });
+            
+            pointCloudOverlayMesh = new THREE.Points(geometry, material);
+            pointCloudOverlayMesh.renderOrder = 100;
+            pointCloudOverlayMesh.frustumCulled = false;
+            scene.add(pointCloudOverlayMesh);
+            
+            pointCloudOverlayMesh.visible = showPointCloudOverlay && renderMode === 'splat';
+        }
+        
+        function createPointCloudFromData(data) {
+            const positions = data.positions;
+            const colors = data.colors;
+            
+            if (!positions || positions.length === 0) return;
+            
+            if (pointCloudMesh) {
+                scene.remove(pointCloudMesh);
+                if (pointCloudMesh.geometry) pointCloudMesh.geometry.dispose();
+                if (pointCloudMesh.material) pointCloudMesh.material.dispose();
+                pointCloudMesh = null;
+            }
+            
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            
+            if (colors && colors.length > 0) {
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 4));
+            }
+            
+            const material = new THREE.PointsMaterial({
+                size: 3,
+                vertexColors: colors && colors.length > 0,
+                color: colors && colors.length > 0 ? undefined : 0x888888,
+                transparent: false,
+                sizeAttenuation: false,
+                depthWrite: true,
+                depthTest: true
+            });
+            
+            pointCloudMesh = new THREE.Points(geometry, material);
+            pointCloudMesh.frustumCulled = false;
+            scene.add(pointCloudMesh);
+            
+            pointCloudMesh.visible = (renderMode !== 'splat');
+        }
+        
+        function updateHighlightFromData(data) {
+            const positions = data.positions;
+            const boundingBox = data.boundingBox;
+            
+            if (highlightMesh) {
+                scene.remove(highlightMesh);
+                if (highlightMesh.geometry) highlightMesh.geometry.dispose();
+                if (highlightMesh.material) highlightMesh.material.dispose();
+                highlightMesh = null;
+            }
+            
+            if (!positions || positions.length === 0) return;
+            
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            
+            const material = new THREE.PointsMaterial({
+                color: 0xffff00,
+                size: 4,
+                transparent: true,
+                opacity: 0.9,
+                depthTest: false,
+                depthWrite: false,
+                sizeAttenuation: false
+            });
+            
+            highlightMesh = new THREE.Points(geometry, material);
+            highlightMesh.renderOrder = 999;
+            highlightMesh.frustumCulled = false;
+            scene.add(highlightMesh);
+        }
+        
+        // ==================== 选择操作 ====================
+        let selectionBox = null;
+        let selectionSvg = null;
+        let selectionPathEl = null;
+        let lastPathUpdate = 0;
+        const PATH_UPDATE_INTERVAL = 16;
+        
+        function createSelectionBox(x, y, width, height) {
+            const overlay = document.getElementById('selection-overlay');
+            if (!selectionBox) {
+                selectionBox = document.createElement('div');
+                selectionBox.className = 'selection-box';
+                overlay.appendChild(selectionBox);
+            }
+            selectionBox.style.left = x + 'px';
+            selectionBox.style.top = y + 'px';
+            selectionBox.style.width = Math.abs(width) + 'px';
+            selectionBox.style.height = Math.abs(height) + 'px';
+            selectionBox.style.display = 'block';
+        }
+        
+        function updateSelectionBox(x, y, width, height) {
+            if (selectionBox) {
+                const left = width < 0 ? x + width : x;
+                const top = height < 0 ? y + height : y;
+                selectionBox.style.left = left + 'px';
+                selectionBox.style.top = top + 'px';
+                selectionBox.style.width = Math.abs(width) + 'px';
+                selectionBox.style.height = Math.abs(height) + 'px';
+            }
+        }
+        
+        function drawSelectionPath() {
+            const now = performance.now();
+            if (now - lastPathUpdate < PATH_UPDATE_INTERVAL) return;
+            lastPathUpdate = now;
+            
+            if (selectionPath.length < 2) return;
+            
+            const overlay = document.getElementById('selection-overlay');
+            
+            if (!selectionSvg) {
+                selectionSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+                selectionSvg.style.cssText = 'width:100%;height:100%;position:absolute;top:0;left:0;pointer-events:none;';
+                selectionPathEl = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+                selectionSvg.appendChild(selectionPathEl);
+                overlay.appendChild(selectionSvg);
+            }
+            
+            const simplifyRate = Math.max(1, Math.floor(selectionPath.length / 200));
+            let pathD = `M ${selectionPath[0].x} ${selectionPath[0].y}`;
+            for (let i = simplifyRate; i < selectionPath.length; i += simplifyRate) {
+                pathD += ` L ${selectionPath[i].x} ${selectionPath[i].y}`;
+            }
+            if (selectionPath.length > 1) {
+                const last = selectionPath[selectionPath.length - 1];
+                pathD += ` L ${last.x} ${last.y}`;
+            }
+            
+            if (currentTool === 'lasso') pathD += ' Z';
+            
+            selectionPathEl.setAttribute('d', pathD);
+            selectionPathEl.setAttribute('stroke', '#8b5cf6');
+            selectionPathEl.setAttribute('stroke-width', currentTool === 'brush' ? Math.min(brushSize, 30) : '2');
+            selectionPathEl.setAttribute('fill', currentTool === 'lasso' ? 'rgba(139, 92, 246, 0.15)' : 'none');
+            selectionPathEl.setAttribute('stroke-dasharray', currentTool === 'lasso' ? '5,5' : 'none');
+            selectionPathEl.setAttribute('stroke-linecap', 'round');
+            selectionPathEl.setAttribute('stroke-linejoin', 'round');
+        }
+        
+        function clearSelectionOverlay() {
+            if (selectionBox) selectionBox.style.display = 'none';
+            if (selectionSvg) selectionSvg.remove();
+            selectionSvg = null;
+            selectionPathEl = null;
+        }
+        
+        // 获取隐藏模型的ID列表
+        function getHiddenModelIds() {
+            const hiddenIds = [];
+            sceneModels.forEach((model, id) => {
+                if (!model.visible) {
+                    hiddenIds.push(id);
+                }
+            });
+            return hiddenIds;
+        }
+        
+        // 检查是否有任何可见的模型
+        function hasVisibleModels() {
+            let hasVisible = false;
+            sceneModels.forEach((model) => {
+                if (model.visible) {
+                    hasVisible = true;
+                }
+            });
+            return hasVisible;
+        }
+        
+        function selectByBox(x1, y1, x2, y2, addToSelection, removeFromSelection) {
+            const minX = Math.min(x1, x2);
+            const maxX = Math.max(x1, x2);
+            const minY = Math.min(y1, y2);
+            const maxY = Math.max(y1, y2);
+            
+            if (Math.abs(maxX - minX) < 5 && Math.abs(maxY - minY) < 5) return;
+            
+            // 如果没有可见的模型，不执行选择
+            if (!hasVisibleModels()) {
+                console.log('[ThreeJS Info] 没有可见的模型，跳过选择');
+                return;
+            }
+            
+            saveUndoState();
+            
+            camera.updateMatrixWorld(true);
+            camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+            
+            sendToPython({
+                type: 'selectByBox',
+                data: {
+                    minX, minY, maxX, maxY,
+                    screenWidth: renderer.domElement.width,
+                    screenHeight: renderer.domElement.height,
+                    addToSelection,
+                    removeFromSelection,
+                    viewMatrix: Array.from(camera.matrixWorldInverse.elements),
+                    projMatrix: Array.from(camera.projectionMatrix.elements),
+                    hiddenModelIds: getHiddenModelIds()
+                }
+            });
+        }
+        
+        function selectByLasso(path, addToSelection, removeFromSelection) {
+            if (path.length < 3) return;
+            
+            // 如果没有可见的模型，不执行选择
+            if (!hasVisibleModels()) {
+                console.log('[ThreeJS Info] 没有可见的模型，跳过选择');
+                return;
+            }
+            
+            saveUndoState();
+            
+            const simplifyRate = Math.max(1, Math.floor(path.length / 100));
+            const simplifiedPath = path.filter((_, i) => i % simplifyRate === 0);
+            
+            camera.updateMatrixWorld(true);
+            camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+            
+            sendToPython({
+                type: 'selectByLasso',
+                data: {
+                    path: simplifiedPath,
+                    screenWidth: renderer.domElement.width,
+                    screenHeight: renderer.domElement.height,
+                    addToSelection,
+                    removeFromSelection,
+                    viewMatrix: Array.from(camera.matrixWorldInverse.elements),
+                    projMatrix: Array.from(camera.projectionMatrix.elements),
+                    hiddenModelIds: getHiddenModelIds()
+                }
+            });
+        }
+        
+        function selectByBrush(path, radius, addToSelection, removeFromSelection) {
+            if (path.length < 1) return;
+            
+            // 如果没有可见的模型，不执行选择
+            if (!hasVisibleModels()) {
+                console.log('[ThreeJS Info] 没有可见的模型，跳过选择');
+                return;
+            }
+            
+            saveUndoState();
+            
+            const simplifyRate = Math.max(1, Math.floor(path.length / 50));
+            const simplifiedPath = path.filter((_, i) => i % simplifyRate === 0);
+            
+            camera.updateMatrixWorld(true);
+            camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+            
+            sendToPython({
+                type: 'selectByBrush',
+                data: {
+                    path: simplifiedPath,
+                    radius: radius,
+                    screenWidth: renderer.domElement.width,
+                    screenHeight: renderer.domElement.height,
+                    addToSelection,
+                    removeFromSelection,
+                    viewMatrix: Array.from(camera.matrixWorldInverse.elements),
+                    projMatrix: Array.from(camera.projectionMatrix.elements),
+                    hiddenModelIds: getHiddenModelIds()
+                }
+            });
+        }
+        
+        function selectAll() {
+            saveUndoState();
+            sendToPython({ type: 'selectAll' });
+        }
+        
+        function selectInverse() {
+            saveUndoState();
+            sendToPython({ type: 'selectInverse' });
+        }
+        
+        function clearSelection() {
+            saveUndoState();
+            selectedPointIndices.clear();
+            updateSelectionDisplay();
+            sendToPython({ type: 'clearSelection' });
+        }
+        
+        // ==================== 编辑操作 ====================
+        function hideSelected() {
+            if (selectedPointIndices.size === 0) return;
+            saveUndoState();
+            
+            selectedPointIndices.forEach(idx => {
+                hiddenPointIndices.add(idx);
+            });
+            
+            updateSelectionDisplay();
+            sendToPython({ type: 'hideSelected' });
+        }
+        
+        function showAll() {
+            saveUndoState();
+            hiddenPointIndices.clear();
+            updateSelectionDisplay();
+            sendToPython({ type: 'showAll' });
+        }
+        
+        function deleteSelected() {
+            if (selectedPointIndices.size === 0) return;
+            
+            const count = selectedPointIndices.size;
+            if (!confirm(`确定要删除 ${count} 个选中的点吗？`)) return;
+            
+            saveUndoState();
+            sendToPython({ type: 'deleteSelected' });
+        }
+        
+        // ==================== 撤销/重做 ====================
+        function saveUndoState() {
+            const state = {
+                selected: new Set(selectedPointIndices),
+                hidden: new Set(hiddenPointIndices),
+                locked: new Set(lockedPointIndices)
+            };
+            
+            undoStack.push(state);
+            if (undoStack.length > MAX_UNDO_STEPS) {
+                undoStack.shift();
+            }
+            
+            redoStack = [];
+        }
+        
+        function undo() {
+            if (undoStack.length === 0) return;
+            
+            redoStack.push({
+                selected: new Set(selectedPointIndices),
+                hidden: new Set(hiddenPointIndices),
+                locked: new Set(lockedPointIndices)
+            });
+            
+            const state = undoStack.pop();
+            selectedPointIndices = state.selected;
+            hiddenPointIndices = state.hidden;
+            lockedPointIndices = state.locked;
+            
+            updateSelectionDisplay();
+            sendToPython({ type: 'undo' });
+        }
+        
+        function redo() {
+            if (redoStack.length === 0) return;
+            
+            undoStack.push({
+                selected: new Set(selectedPointIndices),
+                hidden: new Set(hiddenPointIndices),
+                locked: new Set(lockedPointIndices)
+            });
+            
+            const state = redoStack.pop();
+            selectedPointIndices = state.selected;
+            hiddenPointIndices = state.hidden;
+            lockedPointIndices = state.locked;
+            
+            updateSelectionDisplay();
+            sendToPython({ type: 'redo' });
+        }
+        
+        // ==================== 显示更新 ====================
+        function updateSelectionDisplay() {
+            document.getElementById('selectedCount').textContent = selectedPointIndices.size;
+        }
+        
+        function updatePointCount() {
+            let total = 0;
+            sceneModels.forEach(model => {
+                total += model.pointCount;
+            });
+            document.getElementById('pointCount').textContent = formatNumber(total);
+        }
+        
+        function updateSelectionFromPython(data) {
+            selectedPointIndices.clear();
+            hiddenPointIndices.clear();
+            lockedPointIndices.clear();
+            
+            if (data.selected) {
+                data.selected.forEach(idx => selectedPointIndices.add(idx));
+            }
+            if (data.hidden) {
+                data.hidden.forEach(idx => hiddenPointIndices.add(idx));
+            }
+            if (data.locked) {
+                data.locked.forEach(idx => lockedPointIndices.add(idx));
+            }
+            
+            updateSelectionDisplay();
+        }
+
+        // ==================== 辅助功能 ====================
+        function toggleGrid() {
+            if (infiniteGrid) {
+                infiniteGrid.visible = !infiniteGrid.visible;
+                const btn = document.getElementById('btn-grid');
+                btn.classList.toggle('active', infiniteGrid.visible);
+            }
+        }
+        
+        function toggleAxes() {
+            if (axesHelper) {
+                axesHelper.visible = !axesHelper.visible;
+                const btn = document.getElementById('btn-axes');
+                btn.classList.toggle('active', axesHelper.visible);
+            }
+        }
+        
+        function toggleShortcuts() {
+            const panel = document.getElementById('shortcuts-panel');
+            panel.classList.toggle('visible');
+        }
+        
+        function showLoading(text) {
+            document.getElementById('loading-text').textContent = text || '加载中...';
+            document.getElementById('loading-overlay').classList.remove('hidden');
+        }
+        
+        function hideLoading() {
+            document.getElementById('loading-overlay').classList.add('hidden');
+        }
+    </script>
+
+    <script>
+        // ==================== 渲染循环 ====================
+        let lastTime = performance.now();
+        let frameCount = 0;
+        let lastAxisUpdate = 0;
+        const AXIS_UPDATE_INTERVAL = 50;
+        let lastCameraQuaternion = new THREE.Quaternion();
+        
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // 更新所有Splat Viewer
+            sceneModels.forEach(model => {
+                if (model.viewer) {
+                    model.viewer.update();
+                }
+            });
+            
+            // 更新变换控制器位置和大小
+            if (transformHelper.visible && selectedModelId) {
+                updateTransformHelperPosition();
+            }
+            
+            // 渲染主场景
+            renderer.render(scene, camera);
+            
+            // 单独渲染变换控制器场景（确保在最上层，不被模型遮挡）
+            if (transformHelper.visible && transformScene) {
+                renderer.autoClear = false;
+                renderer.clearDepth();
+                renderer.render(transformScene, camera);
+                renderer.autoClear = true;
+            }
+            
+            // 更新坐标轴指示器
+            const now = performance.now();
+            if (now - lastAxisUpdate > AXIS_UPDATE_INTERVAL) {
+                if (!camera.quaternion.equals(lastCameraQuaternion)) {
+                    updateAxisIndicator();
+                    lastCameraQuaternion.copy(camera.quaternion);
+                }
+                lastAxisUpdate = now;
+            }
+            
+            // 计算FPS
+            frameCount++;
+            if (now - lastTime >= 1000) {
+                document.getElementById('fps').textContent = frameCount;
+                frameCount = 0;
+                lastTime = now;
+            }
+        }
+        
+        // ==================== WebChannel通信 ====================
+        function initWebChannel() {
+            if (typeof QWebChannel !== 'undefined' && typeof qt !== 'undefined' && qt.webChannelTransport) {
+                new QWebChannel(qt.webChannelTransport, function(channel) {
+                    if (channel && channel.objects && channel.objects.pyBridge) {
+                        pyBridge = channel.objects.pyBridge;
+                        window.pyBridge = pyBridge;
+                        console.log('[ThreeJS Info] WebChannel已连接');
+                    }
+                });
+            }
+        }
+        
+        function sendToPython(message) {
+            if (pyBridge && pyBridge.receiveMessage) {
+                pyBridge.receiveMessage(JSON.stringify(message));
+            }
+        }
+        
+        window.receiveMessageFromPython = function(messageStr) {
+            if (!isInitialized) {
+                messageQueue.push(messageStr);
+                return;
+            }
+            
+            const message = JSON.parse(messageStr);
+            console.log('[ThreeJS Info] 收到消息:', message.type);
+            
+            switch(message.type) {
+                case 'loadModel':
+                    handleLoadModel(message.data);
+                    break;
+                case 'captureScreenshot':
+                    captureScreenshot();
+                    break;
+                case 'applySegmentationMask':
+                    applySegmentationMask(message.data);
+                    break;
+                case 'selectPointsByMask':
+                    selectPointsByMask(message.data);
+                    break;
+                case 'deleteUnselectedPoints':
+                    deleteUnselectedPoints();
+                    break;
+                case 'deleteUnselectedPointsPermanently':
+                    deleteUnselectedPointsPermanently(message.data);
+                    break;
+                case 'exportSplitModel':
+                    exportSplitModel(message.data);
+                    break;
+                case 'resetView':
+                    resetCamera();
+                    break;
+                case 'clearModel':
+                    clearAllModels();
+                    break;
+                case 'highlightSelectedPoints':
+                    highlightSelectedPoints(message.data);
+                    break;
+                case 'visualizeContours':
+                    visualizeContoursFromData(message.data);
+                    break;
+                case 'clearVisualization':
+                    clearVisualization();
+                    break;
+                case 'restoreModel':
+                    restoreOriginalModel();
+                    break;
+                case 'clearHighlight':
+                    clearHighlightMesh();
+                    break;
+                case 'hideOriginalModel':
+                    hideOriginalModel();
+                    break;
+                case 'showOriginalModel':
+                    showOriginalModel();
+                    break;
+                case 'previewSplitAsSplat':
+                    previewSplitAsSplat(message.data);
+                    break;
+                case 'previewSplitAsPoints':
+                    previewSplitAsPoints(message.data);
+                    break;
+                case 'clearPreview':
+                    clearPreview();
+                    break;
+                case 'updateSelection':
+                    updateSelectionFromPython(message.data);
+                    break;
+                case 'setRenderMode':
+                    document.getElementById('render-mode').value = message.data.mode;
+                    setRenderMode(message.data.mode);
+                    break;
+                case 'createPointCloudFromData':
+                    createPointCloudFromData(message.data);
+                    break;
+                case 'updateHighlightFromData':
+                    updateHighlightFromData(message.data);
+                    break;
+                case 'createPointCloudOverlay':
+                    createPointCloudOverlay(message.data);
+                    break;
+                default:
+                    console.log('[ThreeJS Info] 未知消息类型:', message.type);
+            }
+        };
+        
+        function handleLoadModel(data) {
+            const url = data.url;
+            const name = data.name || url.split('/').pop();
+            const flyTo = data.flyTo !== false;
+            
+            const id = addModel(url, name, 'splat');
+            loadModelToScene(id, url);
+        }
+        
+        function clearAllModels() {
+            sceneModels.forEach((model, id) => {
+                if (model.mesh) {
+                    scene.remove(model.mesh);
+                }
+                if (model.viewer && model.viewer.dispose) {
+                    model.viewer.dispose();
+                }
+            });
+            
+            sceneModels.clear();
+            selectedModelId = null;
+            
+            if (pointCloudMesh) {
+                scene.remove(pointCloudMesh);
+                pointCloudMesh.geometry.dispose();
+                pointCloudMesh.material.dispose();
+                pointCloudMesh = null;
+            }
+            
+            clearHighlightMesh();
+            clearVisualization();
+            
+            selectedPointIndices.clear();
+            hiddenPointIndices.clear();
+            lockedPointIndices.clear();
+            
+            updateModelList();
+            updatePointCount();
+            updateSelectionDisplay();
+        }
+        
+        function clearHighlightMesh() {
+            if (highlightMesh) {
+                scene.remove(highlightMesh);
+                if (highlightMesh.geometry) highlightMesh.geometry.dispose();
+                if (highlightMesh.material) highlightMesh.material.dispose();
+                highlightMesh = null;
+            }
+        }
+        
+        let contourLines = [];
+        
+        function clearVisualization() {
+            contourLines.forEach(line => {
+                scene.remove(line);
+                if (line.geometry) line.geometry.dispose();
+                if (line.material) line.material.dispose();
+            });
+            contourLines = [];
+        }
+        
+        function restoreOriginalModel() {
+            sceneModels.forEach(model => {
+                if (model.viewer && model.viewer.splatMesh) {
+                    model.viewer.splatMesh.visible = model.visible;
+                }
+            });
+            clearHighlightMesh();
+        }
+        
+        // ==================== 预览功能 ====================
+        let previewMesh = null;
+        
+        function hideOriginalModel() {
+            sceneModels.forEach(model => {
+                if (model.viewer && model.viewer.splatMesh) {
+                    model.viewer.splatMesh.visible = false;
+                }
+            });
+            // 也隐藏高亮
+            if (highlightMesh) {
+                highlightMesh.visible = false;
+            }
+        }
+        
+        function showOriginalModel() {
+            sceneModels.forEach(model => {
+                if (model.viewer && model.viewer.splatMesh) {
+                    model.viewer.splatMesh.visible = model.visible;
+                }
+            });
+            // 恢复高亮显示
+            if (highlightMesh) {
+                highlightMesh.visible = true;
+            }
+        }
+        
+        // 预览用的临时viewer
+        let previewViewer = null;
+        
+        function previewSplitAsSplat(data) {
+            // Splat渲染模式：加载临时splat文件
+            clearPreview();
+            
+            const splatUrl = data.splatUrl || null;
+            
+            console.log('[ThreeJS Debug] Splat预览数据:', {
+                splatUrl: splatUrl
+            });
+            
+            if (!splatUrl) {
+                console.error('[ThreeJS Error] 没有splat URL');
+                return;
+            }
+            
+            // 隐藏原模型和高亮
+            hideOriginalModel();
+            
+            // 使用GaussianSplats3D加载临时splat文件
+            if (typeof GaussianSplats3D !== 'undefined' && GaussianSplats3D.Viewer) {
+                try {
+                    console.log('[ThreeJS Info] 开始加载预览splat:', splatUrl);
+                    
+                    // 创建临时viewer（不附加到DOM，只用于加载splat）
+                    previewViewer = new GaussianSplats3D.Viewer({
+                        cameraUp: [0, 1, 0],
+                        initialCameraPosition: camera.position.toArray(),
+                        initialCameraLookAt: target.toArray(),
+                        sharedMemoryForWorkers: false,  // 禁用共享内存
+                        enableSIMDInSort: false,        // 禁用SIMD（关键！）
+                        gpuAcceleratedSort: false,      // 禁用GPU加速排序
+                        integerBasedSort: false,        // 使用浮点排序
+                        renderer: renderer,             // 使用现有的renderer
+                        camera: camera,                 // 使用现有的camera
+                        useBuiltInControls: false,      // 不使用内置控制
+                        rootElement: null               // 不附加到DOM
+                    });
+                    
+                    previewViewer.addSplatScene(splatUrl, {
+                        splatAlphaRemovalThreshold: 5,
+                        showLoadingUI: false,
+                        progressiveLoad: false,
+                        position: [0, 0, 0],
+                        rotation: [0, 0, 0, 1],
+                        scale: [1, 1, 1]
+                    }).then(() => {
+                        console.log('[ThreeJS Info] Splat场景加载完成');
+                        
+                        // 获取splat mesh并添加到场景
+                        if (previewViewer.splatMesh) {
+                            previewMesh = previewViewer.splatMesh;
+                            scene.add(previewMesh);
+                            console.log('[ThreeJS Info] Splat预览加载成功');
+                        } else {
+                            console.error('[ThreeJS Error] 无法获取splat mesh');
+                        }
+                    }).catch(error => {
+                        console.error('[ThreeJS Error] Splat预览加载失败:', error);
+                        console.error('[ThreeJS Error] 错误详情:', error.stack);
+                    });
+                    
+                } catch (error) {
+                    console.error('[ThreeJS Error] 创建Splat查看器失败:', error);
+                    console.error('[ThreeJS Error] 错误详情:', error.stack);
+                }
+            } else {
+                console.error('[ThreeJS Error] GaussianSplats3D库未加载');
+            }
+            
+            console.log('[ThreeJS Info] 预览模式: Splat渲染');
+        }
+        
+        function previewSplitAsPoints(data) {
+            // 点云渲染模式：创建小点的点云mesh
+            clearPreview();
+            
+            const positions = data.positions || [];
+            const colors = data.colors || [];
+            
+            console.log('[ThreeJS Debug] 点云预览数据:', {
+                positionsLength: positions.length,
+                colorsLength: colors.length,
+                pointCount: positions.length / 3,
+                colorCount: colors.length / 3,
+                colorSample: colors.length >= 9 ? [
+                    `RGB(${colors[0].toFixed(2)}, ${colors[1].toFixed(2)}, ${colors[2].toFixed(2)})`,
+                    `RGB(${colors[3].toFixed(2)}, ${colors[4].toFixed(2)}, ${colors[5].toFixed(2)})`,
+                    `RGB(${colors[6].toFixed(2)}, ${colors[7].toFixed(2)}, ${colors[8].toFixed(2)})`
+                ] : 'none'
+            });
+            
+            if (positions.length === 0) {
+                console.warn('[ThreeJS Warning] 没有点云数据');
+                return;
+            }
+            
+            const geometry = new THREE.BufferGeometry();
+            geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            
+            let hasColors = false;
+            if (colors.length > 0 && colors.length === positions.length) {
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                hasColors = true;
+                console.log('[ThreeJS Info] 设置顶点颜色成功');
+            } else {
+                console.warn('[ThreeJS Warning] 颜色数据长度不匹配或为空:', {
+                    positionsLength: positions.length,
+                    colorsLength: colors.length
+                });
+            }
+            
+            const material = new THREE.PointsMaterial({
+                size: 0.08,  // 稍大一点的点，更容易看清颜色
+                vertexColors: hasColors,
+                color: hasColors ? 0xffffff : 0xaaaaaa,
+                sizeAttenuation: true,
+                transparent: false,
+                opacity: 1.0
+            });
+            
+            console.log('[ThreeJS Debug] 材质设置:', {
+                vertexColors: material.vertexColors,
+                color: material.color.getHexString(),
+                size: material.size
+            });
+            
+            previewMesh = new THREE.Points(geometry, material);
+            scene.add(previewMesh);
+            
+            // 隐藏原模型和高亮
+            hideOriginalModel();
+            
+            console.log('[ThreeJS Info] 预览模式: 点云渲染, 点数:', positions.length / 3, '颜色:', hasColors ? '有' : '无');
+        }
+        
+        function clearPreview() {
+            if (previewMesh) {
+                scene.remove(previewMesh);
+                if (previewMesh.geometry) previewMesh.geometry.dispose();
+                if (previewMesh.material) previewMesh.material.dispose();
+                previewMesh = null;
+            }
+            
+            // 清理预览viewer
+            if (previewViewer) {
+                try {
+                    if (previewViewer.dispose) {
+                        previewViewer.dispose();
+                    }
+                } catch (e) {
+                    console.warn('[ThreeJS Warning] 清理预览viewer失败:', e);
+                }
+                previewViewer = null;
+            }
+        }
+        
+        // ==================== 截图和分割 ====================
+        function captureScreenshot() {
+            try {
+                const canvas = renderer.domElement;
+                const imageData = canvas.toDataURL('image/png');
+                
+                camera.updateMatrix();
+                camera.updateMatrixWorld(true);
+                camera.updateProjectionMatrix();
+                camera.matrixWorldInverse.copy(camera.matrixWorld).invert();
+                
+                const cameraPosition = camera.position.clone();
+                const cameraDirection = new THREE.Vector3(0, 0, -1);
+                cameraDirection.applyQuaternion(camera.quaternion);
+                const cameraTarget = cameraPosition.clone().add(cameraDirection);
+                
+                sendToPython({
+                    type: 'screenshotCaptured',
+                    data: {
+                        imageData: imageData,
+                        width: canvas.width,
+                        height: canvas.height,
+                        cameraPosition: [cameraPosition.x, cameraPosition.y, cameraPosition.z],
+                        cameraTarget: [cameraTarget.x, cameraTarget.y, cameraTarget.z],
+                        cameraFov: camera.fov,
+                        viewMatrix: Array.from(camera.matrixWorldInverse.elements),
+                        projMatrix: Array.from(camera.projectionMatrix.elements)
+                    }
+                });
+            } catch (error) {
+                console.error('[ThreeJS Error] 截图失败:', error);
+                sendToPython({
+                    type: 'screenshotCaptured',
+                    success: false,
+                    error: error.message
+                });
+            }
+        }
+        
+        let segmentationMask = null;
+        
+        function applySegmentationMask(data) {
+            segmentationMask = {
+                data: data.mask,
+                width: data.width,
+                height: data.height
+            };
+            
+            sendToPython({
+                type: 'segmentationComplete',
+                success: true
+            });
+        }
+        
+        function selectPointsByMask(data) {
+            const keepSelected = data.keepSelected !== false;
+            selectedPointIndices.clear();
+            
+            // 遍历所有模型
+            sceneModels.forEach(model => {
+                if (!model.viewer || !segmentationMask) return;
+                
+                try {
+                    const splatCount = model.viewer.getSplatCount ? model.viewer.getSplatCount() : 0;
+                    
+                    for (let i = 0; i < splatCount; i++) {
+                        const position = new THREE.Vector3();
+                        if (model.viewer.getSplatCenter) {
+                            model.viewer.getSplatCenter(i, position);
+                        }
+                        
+                        const screenPos = position.clone().project(camera);
+                        
+                        const x = Math.floor((screenPos.x + 1) / 2 * segmentationMask.width);
+                        const y = Math.floor((1 - screenPos.y) / 2 * segmentationMask.height);
+                        
+                        if (x >= 0 && x < segmentationMask.width && 
+                            y >= 0 && y < segmentationMask.height) {
+                            const maskIndex = y * segmentationMask.width + x;
+                            const maskValue = segmentationMask.data[maskIndex];
+                            
+                            if (keepSelected) {
+                                if (maskValue > 0) {
+                                    selectedPointIndices.add(i);
+                                }
+                            } else {
+                                if (maskValue === 0) {
+                                    selectedPointIndices.add(i);
+                                }
+                            }
+                        }
+                    }
+                } catch (error) {
+                    console.error('[ThreeJS Error] 选择点失败:', error);
+                }
+            });
+            
+            updateSelectionDisplay();
+            
+            sendToPython({
+                type: 'pointsSelected',
+                data: {
+                    selectedCount: selectedPointIndices.size
+                }
+            });
+        }
+        
+        function deleteUnselectedPoints() {
+            // 旧的删除函数 - 仅用于向后兼容
+            if (selectedPointIndices.size === 0) return;
+            
+            sceneModels.forEach(model => {
+                if (model.viewer && model.viewer.splatMesh) {
+                    model.viewer.splatMesh.visible = false;
+                }
+            });
+            
+            if (highlightMesh) {
+                highlightMesh.material.opacity = 1.0;
+                highlightMesh.material.size = 0.2;
+                highlightMesh.material.needsUpdate = true;
+            }
+            
+            sendToPython({
+                type: 'pointsDeleted',
+                data: { remainingCount: selectedPointIndices.size }
+            });
+        }
+        
+        function deleteUnselectedPointsPermanently(data) {
+            // 永久删除未选中的点 - 只保留选中的点
+            const selectedIndices = new Set(data.selectedIndices || []);
+            
+            if (selectedIndices.size === 0) {
+                console.warn('[ThreeJS Warning] 没有选中的点');
+                return;
+            }
+            
+            // 清除预览
+            clearPreview();
+            
+            // 隐藏原始splat模型
+            sceneModels.forEach(model => {
+                if (model.viewer && model.viewer.splatMesh) {
+                    model.viewer.splatMesh.visible = false;
+                }
+            });
+            
+            // 清除旧的高亮
+            clearHighlightMesh();
+            
+            // 只显示选中的点（作为点云）
+            // 注意：这里我们无法真正修改splat数据，只能通过显示/隐藏来模拟
+            // 真正的删除在Python端完成
+            
+            console.log('[ThreeJS Info] 永久删除完成，保留', selectedIndices.size, '个点');
+            
+            // 更新选中状态
+            selectedPointIndices = selectedIndices;
+            updateSelectionDisplay();
+            
+            sendToPython({
+                type: 'pointsDeletedPermanently',
+                data: { remainingCount: selectedIndices.size }
+            });
+        }
+        
+        function exportSplitModel(data) {
+            const outputPath = data.outputPath;
+            
+            sendToPython({
+                type: 'modelSplitComplete',
+                success: true,
+                data: {
+                    outputPath: outputPath,
+                    selectedIndices: Array.from(selectedPointIndices)
+                }
+            });
+        }
+        
+        function highlightSelectedPoints(data) {
+            const indices = data.indices || [];
+            const count = data.count || indices.length;
+            const positions3D = data.positions || null;
+            
+            clearHighlightMesh();
+            
+            if (count === 0) {
+                document.getElementById('selectedCount').textContent = '0';
+                return;
+            }
+            
+            selectedPointIndices.clear();
+            indices.forEach(i => selectedPointIndices.add(i));
+            
+            try {
+                let positions = [];
+                
+                if (positions3D && positions3D.length > 0) {
+                    const maxDisplayPoints = 50000;
+                    let sampleRate = 1;
+                    if (positions3D.length > maxDisplayPoints) {
+                        sampleRate = Math.ceil(positions3D.length / maxDisplayPoints);
+                    }
+                    
+                    for (let i = 0; i < positions3D.length; i += sampleRate) {
+                        const pt = positions3D[i];
+                        positions.push(pt[0], pt[1], pt[2]);
+                    }
+                }
+                
+                if (positions.length > 0) {
+                    const geometry = new THREE.BufferGeometry();
+                    geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+                    
+                    const material = new THREE.PointsMaterial({
+                        color: 0xffff00,  // 黄色高亮
+                        size: 0.1,  // 较小的点，更清晰
+                        transparent: true,
+                        opacity: 1.0,  // 完全不透明
+                        depthTest: true,  // 启用深度测试，更真实
+                        depthWrite: false,
+                        sizeAttenuation: true  // 启用透视缩放
+                    });
+                    
+                    highlightMesh = new THREE.Points(geometry, material);
+                    highlightMesh.renderOrder = 999;
+                    scene.add(highlightMesh);
+                    
+                    console.log('[ThreeJS Info] 高亮显示', positions.length / 3, '个点');
+                }
+            } catch (error) {
+                console.error('[ThreeJS Error] 创建高亮失败:', error);
+            }
+            
+            document.getElementById('selectedCount').textContent = count;
+            
+            sendToPython({
+                type: 'pointsHighlighted',
+                data: { highlightedCount: count }
+            });
+        }
+        
+        function visualizeContoursFromData(data) {
+            try {
+                const contours = data.contours || [];
+                const imageWidth = data.imageWidth || renderer.domElement.width;
+                const imageHeight = data.imageHeight || renderer.domElement.height;
+                
+                clearVisualization();
+                
+                if (contours.length === 0) return;
+                
+                const raycaster = new THREE.Raycaster();
+                
+                contours.forEach((contour, contourIdx) => {
+                    if (!contour || contour.length < 3) return;
+                    
+                    const contour3D = [];
+                    const sampleRate = Math.max(1, Math.floor(contour.length / 100));
+                    
+                    for (let i = 0; i < contour.length; i += sampleRate) {
+                        const point = contour[i];
+                        
+                        const ndcX = (point[0] / imageWidth) * 2 - 1;
+                        const ndcY = -((point[1] / imageHeight) * 2 - 1);
+                        
+                        raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+                        
+                        const direction = raycaster.ray.direction.clone();
+                        const distance = 8;
+                        const intersectionPoint = camera.position.clone().add(direction.multiplyScalar(distance));
+                        
+                        contour3D.push(intersectionPoint);
+                    }
+                    
+                    if (contour3D.length > 2) {
+                        contour3D.push(contour3D[0].clone());
+                        
+                        const geometry = new THREE.BufferGeometry().setFromPoints(contour3D);
+                        const material = new THREE.LineBasicMaterial({
+                            color: 0xff00ff,
+                            linewidth: 3,
+                            transparent: true,
+                            opacity: 0.9
+                        });
+                        const line = new THREE.Line(geometry, material);
+                        scene.add(line);
+                        contourLines.push(line);
+                    }
+                });
+            } catch (error) {
+                console.error('[ThreeJS Error] 可视化轮廓失败:', error);
+            }
+        }
+        
+        // ==================== 页面加载 ====================
+        window.addEventListener('load', function() {
+            function waitForLibraries() {
+                if (typeof THREE !== 'undefined') {
+                    init();
+                } else {
+                    setTimeout(waitForLibraries, 100);
+                }
+            }
+            waitForLibraries();
+        });
+    </script>
+</body>
+</html>
