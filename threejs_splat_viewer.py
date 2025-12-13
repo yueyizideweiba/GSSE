@@ -14,10 +14,209 @@ from PyQt5.QtGui import QImage, QPixmap
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
     QMessageBox, QFrame, QGroupBox, QLineEdit, QDoubleSpinBox,
-    QProgressBar, QSplitter, QFileDialog, QComboBox, QCheckBox
+    QProgressBar, QSplitter, QFileDialog, QComboBox, QCheckBox,
+    QDialog, QScrollArea
 )
 from PyQt5.QtWebEngineWidgets import QWebEngineView, QWebEnginePage, QWebEngineSettings
 from PyQt5.QtWebChannel import QWebChannel
+from PyQt5.QtGui import QPainter, QColor, QBrush, QPolygon, QCursor
+
+
+class ClickableLabel(QLabel):
+    """可点击的标签，用于截图预览"""
+    
+    clicked = pyqtSignal()
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setCursor(QCursor(Qt.PointingHandCursor))
+        
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit()
+        super().mousePressEvent(event)
+
+
+class ImagePreviewDialog(QDialog):
+    """图片放大预览对话框"""
+    
+    def __init__(self, parent=None, title="截图预览"):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        
+        # 存储原始图像
+        self._original_image = None
+        self._mask_overlay_image = None
+        self._show_mask = True
+        
+        # 缩放比例
+        self._zoom = 1.0
+        self._min_zoom = 0.1
+        self._max_zoom = 5.0
+        
+        # 工具栏高度预估
+        self._toolbar_height = 50
+        
+        self.init_ui()
+        
+    def init_ui(self):
+        """初始化UI"""
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 工具栏
+        toolbar = QHBoxLayout()
+        
+        # 切换显示mask按钮
+        self.toggle_mask_btn = QPushButton("隐藏分割结果")
+        self.toggle_mask_btn.clicked.connect(self.toggle_mask_display)
+        self.toggle_mask_btn.setEnabled(False)
+        toolbar.addWidget(self.toggle_mask_btn)
+        
+        toolbar.addStretch()
+        
+        # 提示文字
+        hint_label = QLabel("滚动鼠标滚轮缩放，按0重置")
+        hint_label.setStyleSheet("color: #888; font-size: 11px;")
+        toolbar.addWidget(hint_label)
+        
+        # 关闭按钮
+        close_btn = QPushButton("关闭")
+        close_btn.clicked.connect(self.close)
+        toolbar.addWidget(close_btn)
+        
+        layout.addLayout(toolbar)
+        
+        # 滚动区域
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(False)  # 不自动调整大小，保持原始尺寸
+        self.scroll_area.setAlignment(Qt.AlignCenter)
+        self.scroll_area.setStyleSheet("background-color: #1E1E1E; border: 1px solid #444;")
+        
+        # 图片标签
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setStyleSheet("background-color: transparent;")
+        
+        self.scroll_area.setWidget(self.image_label)
+        layout.addWidget(self.scroll_area)
+        
+    def set_images(self, original_image: QImage, mask_overlay_image: QImage = None):
+        """
+        设置要显示的图像
+        
+        Args:
+            original_image: 原始截图
+            mask_overlay_image: 带分割mask叠加的图像（可选）
+        """
+        self._original_image = original_image
+        self._mask_overlay_image = mask_overlay_image
+        self._show_mask = mask_overlay_image is not None
+        
+        # 启用/禁用切换按钮
+        self.toggle_mask_btn.setEnabled(mask_overlay_image is not None)
+        if mask_overlay_image is not None:
+            self.toggle_mask_btn.setText("隐藏分割结果")
+        
+        # 根据图片大小调整窗口尺寸
+        self._adjust_window_size()
+        
+        self._update_display()
+    
+    def _adjust_window_size(self):
+        """根据图片大小调整窗口尺寸"""
+        if self._original_image is None:
+            return
+        
+        # 获取图片尺寸
+        img_width = self._original_image.width()
+        img_height = self._original_image.height()
+        
+        # 获取屏幕尺寸
+        from PyQt5.QtWidgets import QApplication
+        screen = QApplication.primaryScreen()
+        screen_rect = screen.availableGeometry()
+        max_width = int(screen_rect.width() * 0.9)
+        max_height = int(screen_rect.height() * 0.9)
+        
+        # 计算窗口尺寸（图片尺寸 + 边距 + 工具栏）
+        margin = 40  # 边距
+        toolbar_height = 50  # 工具栏高度
+        
+        window_width = img_width + margin
+        window_height = img_height + margin + toolbar_height
+        
+        # 限制最大尺寸
+        window_width = min(window_width, max_width)
+        window_height = min(window_height, max_height)
+        
+        # 设置最小尺寸
+        window_width = max(window_width, 400)
+        window_height = max(window_height, 300)
+        
+        self.resize(window_width, window_height)
+        
+    def _update_display(self):
+        """更新显示的图像"""
+        if self._original_image is None:
+            return
+        
+        # 选择要显示的图像
+        if self._show_mask and self._mask_overlay_image is not None:
+            image = self._mask_overlay_image
+        else:
+            image = self._original_image
+        
+        # 应用缩放
+        scaled_width = int(image.width() * self._zoom)
+        scaled_height = int(image.height() * self._zoom)
+        
+        pixmap = QPixmap.fromImage(image)
+        scaled_pixmap = pixmap.scaled(scaled_width, scaled_height, 
+                                       Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        
+        self.image_label.setPixmap(scaled_pixmap)
+        self.image_label.resize(scaled_pixmap.size())
+        
+    def toggle_mask_display(self):
+        """切换是否显示分割mask"""
+        self._show_mask = not self._show_mask
+        
+        if self._show_mask:
+            self.toggle_mask_btn.setText("隐藏分割结果")
+        else:
+            self.toggle_mask_btn.setText("显示分割结果")
+        
+        self._update_display()
+        
+    def wheelEvent(self, event):
+        """鼠标滚轮缩放"""
+        delta = event.angleDelta().y()
+        
+        if delta > 0:
+            # 放大
+            self._zoom = min(self._zoom * 1.1, self._max_zoom)
+        else:
+            # 缩小
+            self._zoom = max(self._zoom / 1.1, self._min_zoom)
+        
+        self._update_display()
+        
+    def keyPressEvent(self, event):
+        """键盘事件"""
+        if event.key() == Qt.Key_Escape:
+            self.close()
+        elif event.key() == Qt.Key_Plus or event.key() == Qt.Key_Equal:
+            self._zoom = min(self._zoom * 1.1, self._max_zoom)
+            self._update_display()
+        elif event.key() == Qt.Key_Minus:
+            self._zoom = max(self._zoom / 1.1, self._min_zoom)
+            self._update_display()
+        elif event.key() == Qt.Key_0:
+            self._zoom = 1.0
+            self._update_display()
+        else:
+            super().keyPressEvent(event)
 
 
 class ThreeJSBridge(QObject):
@@ -756,12 +955,14 @@ class SplatSplitterPanel(QWidget):
         self.screenshot_btn.setEnabled(False)
         segment_layout.addWidget(self.screenshot_btn)
         
-        # 截图预览
-        self.preview_label = QLabel()
+        # 截图预览（可点击放大）
+        self.preview_label = ClickableLabel()
         self.preview_label.setFixedSize(280, 180)
         self.preview_label.setStyleSheet("background-color: #1E1E1E; border: 1px solid #444;")
         self.preview_label.setAlignment(Qt.AlignCenter)
         self.preview_label.setText("等待截图...")
+        self.preview_label.setToolTip("点击放大查看")
+        self.preview_label.clicked.connect(self.on_preview_clicked)
         segment_layout.addWidget(self.preview_label)
         
         # 分割提示词
@@ -950,9 +1151,81 @@ class SplatSplitterPanel(QWidget):
             scaled = pixmap.scaled(self.preview_label.size(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
             self.preview_label.setPixmap(scaled)
             self.segment_btn.setEnabled(True)
-            self.status_label.setText("截图完成，可以进行分割")
+            self.status_label.setText("截图完成，可以进行分割（点击预览图放大查看）")
         else:
             self.status_label.setText("截图失败")
+    
+    def on_preview_clicked(self):
+        """点击预览图放大查看"""
+        if self.current_screenshot is None:
+            return
+        
+        # 创建预览对话框
+        dialog = ImagePreviewDialog(self, "截图预览 - 分割效果查看")
+        
+        # 如果有分割mask，生成带mask叠加的图像
+        mask_overlay_image = None
+        if self.segmentation_mask is not None:
+            mask_overlay_image = self._create_mask_overlay_image()
+        
+        # 设置图像
+        dialog.set_images(self.current_screenshot, mask_overlay_image)
+        
+        # 显示对话框
+        dialog.exec_()
+    
+    def _create_mask_overlay_image(self) -> QImage:
+        """创建带分割mask叠加的图像"""
+        if self.current_screenshot is None or self.segmentation_mask is None:
+            return None
+        
+        import cv2
+        from PyQt5.QtCore import QPoint
+        
+        # 创建带mask的图像
+        pixmap = QPixmap.fromImage(self.current_screenshot)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 调整mask大小以匹配图像
+        mask_resized = cv2.resize(
+            self.segmentation_mask.astype(np.uint8),
+            (pixmap.width(), pixmap.height()),
+            interpolation=cv2.INTER_NEAREST
+        )
+        
+        # 定义颜色
+        unique_labels = np.unique(mask_resized)
+        colors = [
+            QColor(255, 0, 0, 100),    # 红色
+            QColor(0, 255, 0, 100),    # 绿色
+            QColor(0, 0, 255, 100),    # 蓝色
+            QColor(255, 255, 0, 100),  # 黄色
+            QColor(255, 0, 255, 100),  # 紫色
+            QColor(0, 255, 255, 100),  # 青色
+        ]
+        
+        for idx, label in enumerate(unique_labels):
+            if label == 0:
+                continue
+            
+            color = colors[idx % len(colors)]
+            painter.setBrush(QBrush(color))
+            painter.setPen(Qt.NoPen)
+            
+            mask_label = (mask_resized == label).astype(np.uint8)
+            contours, _ = cv2.findContours(mask_label, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            
+            for contour in contours:
+                if len(contour) < 3:
+                    continue
+                points = [QPoint(int(p[0][0]), int(p[0][1])) for p in contour]
+                polygon = QPolygon(points)
+                painter.drawPolygon(polygon)
+        
+        painter.end()
+        
+        return pixmap.toImage()
             
     def on_segment(self):
         """执行SAM3分割"""
@@ -1215,7 +1488,7 @@ class SplatSplitterPanel(QWidget):
                     # 如果有颜色数据，也提取出来
                     if hasattr(self.splitter, 'colors') and self.splitter.colors is not None:
                         selected_colors = self.splitter.colors[self.selected_indices]
-                        print(f"[SplatSplitterPanel] 提取颜色数据: 形状={selected_colors.shape}, dtype={selected_colors.dtype}")
+                        print(f"[SplatSplitterPanel] 提取颜色数据: 形状={selected_colors.shape}, dtype={selected_colors.dtype}, 范围=[{selected_colors.min()}, {selected_colors.max()}]")
                     else:
                         print(f"[SplatSplitterPanel] 警告: splitter没有颜色数据")
                     
@@ -1228,51 +1501,66 @@ class SplatSplitterPanel(QWidget):
                     
                     if selected_colors is not None:
                         # 确保颜色在0-1范围内
-                        if selected_colors.max() > 1.0:
-                            # 如果是0-255范围，转换为0-1
+                        if selected_colors.dtype == np.uint8 or selected_colors.max() > 1.0:
+                            # 如果是uint8或0-255范围，转换为0-1
                             colors_normalized = selected_colors.astype(np.float32) / 255.0
+                            print(f"[SplatSplitterPanel] 颜色从uint8/0-255转换为float32/0-1")
                         else:
+                            # 已经是0-1范围的float
                             colors_normalized = selected_colors.astype(np.float32)
+                            print(f"[SplatSplitterPanel] 颜色已经是0-1范围")
+                        
+                        # 确保在有效范围内
+                        colors_normalized = np.clip(colors_normalized, 0.0, 1.0)
                         colors_flat = colors_normalized.flatten().tolist()
-                        print(f"[SplatSplitterPanel] 颜色数据: 形状={selected_colors.shape}, dtype={selected_colors.dtype}, 范围=[{selected_colors.min()}, {selected_colors.max()}]")
-                        print(f"[SplatSplitterPanel] 归一化后: 形状={colors_normalized.shape}, 范围=[{colors_normalized.min():.3f}, {colors_normalized.max():.3f}]")
-                        print(f"[SplatSplitterPanel] 前3个点的颜色: {colors_normalized[:3].tolist()}")
+                        
+                        print(f"[SplatSplitterPanel] 归一化后颜色: 形状={colors_normalized.shape}, dtype={colors_normalized.dtype}, 范围=[{colors_normalized.min():.3f}, {colors_normalized.max():.3f}]")
+                        print(f"[SplatSplitterPanel] 前3个点的颜色RGB: {colors_normalized[:3].tolist()}")
                         print(f"[SplatSplitterPanel] 发送数据长度: positions={len(positions_flat)}, colors={len(colors_flat)}")
                     else:
-                        print(f"[SplatSplitterPanel] 警告: 没有颜色数据")
+                        print(f"[SplatSplitterPanel] 警告: 没有颜色数据，将使用默认灰色")
                     
                     # 根据预览模式渲染
                     if self._preview_render_mode == 'splat':
-                        # Splat渲染模式：导出临时splat文件并加载
-                        self.status_label.setText("正在生成预览splat文件...")
+                        # Splat渲染模式：直接加载PLY文件（不转换为splat）
+                        self.status_label.setText("正在生成预览3DGS模型...")
                         
-                        # 生成临时splat文件
+                        # 生成临时PLY文件（包含完整的高斯参数）
                         import tempfile
                         temp_dir = tempfile.gettempdir()
-                        temp_splat_path = os.path.join(temp_dir, 'preview_temp.splat')
+                        temp_ply_path = os.path.join(temp_dir, 'preview_temp.ply')
                         
-                        splat_url = None
-                        if self.splitter.export_selected_to_splat(self.selected_indices, temp_splat_path):
-                            # 通过HTTP服务器提供文件
+                        ply_url = None
+                        
+                        # 导出完整的PLY文件
+                        if self.splitter.export_selected_points(self.selected_indices, temp_ply_path):
+                            print(f"[SplatSplitterPanel] ✓ 临时PLY文件已生成: {temp_ply_path}")
+                            
+                            # 通过HTTP服务器提供PLY文件
                             try:
                                 from temp_http_server import add_file_to_server
-                                splat_url = add_file_to_server(temp_splat_path, 'preview_temp.splat')
-                                print(f"[SplatSplitterPanel] Splat文件已准备: {splat_url}")
+                                ply_url = add_file_to_server(temp_ply_path, 'preview_temp.ply')
+                                print(f"[SplatSplitterPanel] ✓ PLY文件已准备: {ply_url}")
+                                print(f"[SplatSplitterPanel] ✓ URL验证: 以.ply结尾={ply_url.endswith('.ply')}")
                             except Exception as e:
-                                print(f"[SplatSplitterPanel] 提供splat文件失败: {e}")
+                                print(f"[SplatSplitterPanel] ✗ 提供PLY文件失败: {e}")
+                                import traceback
+                                traceback.print_exc()
+                        else:
+                            print(f"[SplatSplitterPanel] ✗ 导出临时PLY失败")
                         
-                        # 发送splat URL
+                        # 发送PLY URL（直接加载PLY，不转换为splat）
                         self.viewer.send_message({
-                            'type': 'previewSplitAsSplat',
+                            'type': 'previewSplitAsPly',
                             'data': {
-                                'splatUrl': splat_url
+                                'plyUrl': ply_url
                             }
                         })
                         
-                        if splat_url:
-                            self.status_label.setText(f"预览模式：Splat渲染 ({len(self.selected_indices)} 个点)")
+                        if ply_url:
+                            self.status_label.setText(f"预览模式：3DGS渲染 ({len(self.selected_indices)} 个高斯点)")
                         else:
-                            self.status_label.setText("Splat预览失败：无法生成临时文件")
+                            self.status_label.setText("3DGS预览失败：无法生成临时文件")
                     else:
                         # 点云渲染模式：发送点云数据
                         self.viewer.send_message({
@@ -1434,21 +1722,33 @@ class SplatSplitterPanel(QWidget):
             fov_rad = np.radians(fov)
             aspect = mask_width / mask_height
             
-            # 透视除法
+            # 透视除法 - 使用更精确的计算
             proj_x = np.zeros_like(cam_x)
             proj_y = np.zeros_like(cam_y)
             
-            proj_x[valid_depth] = cam_x[valid_depth] / (cam_z[valid_depth] * np.tan(fov_rad / 2) * aspect)
-            proj_y[valid_depth] = cam_y[valid_depth] / (cam_z[valid_depth] * np.tan(fov_rad / 2))
+            # 添加小的epsilon避免除零
+            safe_z = np.maximum(cam_z[valid_depth], 0.1)
+            
+            proj_x[valid_depth] = cam_x[valid_depth] / (safe_z * np.tan(fov_rad / 2) * aspect)
+            proj_y[valid_depth] = cam_y[valid_depth] / (safe_z * np.tan(fov_rad / 2))
+            
+            # 限制投影坐标范围，避免极端值
+            proj_x = np.clip(proj_x, -10, 10)
+            proj_y = np.clip(proj_y, -10, 10)
             
             # 转换到屏幕坐标 [0, width] 和 [0, height]
             screen_x = ((proj_x + 1) / 2 * mask_width).astype(np.int32)
             screen_y = ((1 - proj_y) / 2 * mask_height).astype(np.int32)  # Y轴翻转
             
-            # 裁剪到有效范围
-            valid_x = (screen_x >= 0) & (screen_x < mask_width)
-            valid_y = (screen_y >= 0) & (screen_y < mask_height)
+            # 裁剪到有效范围，添加边界容差
+            margin = 2  # 像素边界容差
+            valid_x = (screen_x >= -margin) & (screen_x < mask_width + margin)
+            valid_y = (screen_y >= -margin) & (screen_y < mask_height + margin)
             valid = valid_depth & valid_x & valid_y
+            
+            # 将边界外的坐标裁剪到有效范围内
+            screen_x = np.clip(screen_x, 0, mask_width - 1)
+            screen_y = np.clip(screen_y, 0, mask_height - 1)
             
             # 获取有效点的索引和屏幕坐标
             valid_indices = np.where(valid)[0]
@@ -1658,14 +1958,14 @@ class SplatSplitterPanel(QWidget):
             self.preview_split_btn.setEnabled(False)  # 删除后禁用预览按钮
             
     def on_export_to_cesium(self):
-        """导出分割模型并加载到Cesium"""
+        """导出分割模型并加载到Cesium（使用PLY格式）"""
         if not self.current_model_path:
             QMessageBox.warning(self, "警告", "没有加载模型")
             return
         
         # 生成输出路径
         base, ext = os.path.splitext(self.current_model_path)
-        output_splat_path = f"{base}_split.splat"
+        output_ply_path = f"{base}_split.ply"
         
         lon = self.lon_input.value()
         lat = self.lat_input.value()
@@ -1676,24 +1976,16 @@ class SplatSplitterPanel(QWidget):
         if self.splitter and self.selected_indices is not None and len(self.selected_indices) > 0:
             self.status_label.setText(f"正在导出 {len(self.selected_indices)} 个高斯点...")
             
-            # 直接导出为splat格式（跳过PLY中间步骤）
-            if self.splitter.export_selected_to_splat(self.selected_indices, output_splat_path):
-                self.status_label.setText(f"导出成功: {output_splat_path}")
-                self.load_to_cesium_requested.emit(output_splat_path, lon, lat, alt, scale)
+            # 导出完整的PLY文件（包含所有高斯参数）
+            if self.splitter.export_selected_points(self.selected_indices, output_ply_path):
+                print(f"[SplatSplitterPanel] ✓ 导出完整3DGS PLY文件: {output_ply_path}")
+                self.status_label.setText(f"✓ 导出成功: {output_ply_path}")
+                
+                # 直接使用PLY文件加载到Cesium（不转换为splat）
+                self.load_to_cesium_requested.emit(output_ply_path, lon, lat, alt, scale)
             else:
-                # 如果直接导出失败，尝试通过PLY中间步骤
-                output_ply_path = f"{base}_split.ply"
-                self.status_label.setText("直接导出失败，尝试PLY中间步骤...")
-                if self.splitter.export_selected_points(self.selected_indices, output_ply_path):
-                    if self.splitter.convert_to_splat(output_ply_path, output_splat_path):
-                        self.status_label.setText(f"导出成功: {output_splat_path}")
-                        self.load_to_cesium_requested.emit(output_splat_path, lon, lat, alt, scale)
-                    else:
-                        self.status_label.setText(f"使用PLY: {output_ply_path}")
-                        self.load_to_cesium_requested.emit(output_ply_path, lon, lat, alt, scale)
-                else:
-                    self.status_label.setText("导出失败")
-                    QMessageBox.warning(self, "警告", "导出分割模型失败")
+                self.status_label.setText("✗ 导出失败")
+                QMessageBox.warning(self, "警告", "导出分割模型失败，请检查日志")
         else:
             # 使用JavaScript端的导出（如果没有Python端分割器）
             output_path = self.viewer.export_split_model()
@@ -1809,6 +2101,9 @@ class ThreeJSSplatSplitterTab(QWidget):
         bridge.model_deselected.connect(self._on_model_deselected)
         bridge.request_point_cloud_overlay.connect(self._on_request_point_cloud_overlay)
         
+        # 变换操作 - 同步到Python端点云数据
+        bridge.model_transformed.connect(self._on_model_transformed)
+        
     def load_model(self, file_path: str):
         """加载模型文件"""
         self.panel.current_model_path = file_path
@@ -1820,6 +2115,12 @@ class ThreeJSSplatSplitterTab(QWidget):
         self.locked_indices.clear()
         self.undo_stack.clear()
         self.redo_stack.clear()
+        
+        # 重置变换原始数据
+        self._original_xyz = None
+        self._original_center = None
+        self._original_scales = None
+        self._original_rotations = None
         
         # 如果是PLY文件，同时加载到Python端的分割器
         if file_path.lower().endswith('.ply'):
@@ -2405,6 +2706,183 @@ class ThreeJSSplatSplitterTab(QWidget):
         
         self.viewer.send_point_cloud_overlay(xyz, colors)
         print(f"[ThreeJSSplatSplitterTab] 发送点云叠加数据: {len(xyz)} 个点")
+    
+    def _on_model_transformed(self, data: dict):
+        """
+        处理模型变换 - 将变换应用到Python端的点云数据
+        
+        变换是累积的：每次收到的数据是模型相对于原始状态的总变换。
+        为了正确处理，我们保存原始数据，每次从原始数据计算变换结果。
+        
+        Args:
+            data: 变换数据，包含 position, rotation, scale
+        """
+        if not self.panel.splitter or self.panel.splitter.xyz is None:
+            return
+        
+        # 保存原始数据（只在第一次变换时保存）
+        if not hasattr(self, '_original_xyz') or self._original_xyz is None:
+            self._original_xyz = self.panel.splitter.xyz.copy()
+            self._original_center = np.mean(self._original_xyz, axis=0)
+            if hasattr(self.panel.splitter, 'scales') and self.panel.splitter.scales is not None:
+                self._original_scales = self.panel.splitter.scales.copy()
+            else:
+                self._original_scales = None
+            if hasattr(self.panel.splitter, 'rotations') and self.panel.splitter.rotations is not None:
+                self._original_rotations = self.panel.splitter.rotations.copy()
+            else:
+                self._original_rotations = None
+        
+        # 获取变换参数
+        position = data.get('position', {'x': 0, 'y': 0, 'z': 0})
+        rotation = data.get('rotation', {'x': 0, 'y': 0, 'z': 0})
+        scale = data.get('scale', 1.0)
+        
+        # 从原始数据开始计算
+        xyz = self._original_xyz.copy()
+        center = self._original_center
+        
+        # 1. 先将点云移到原点（以中心为基准）
+        xyz_centered = xyz - center
+        
+        # 2. 应用缩放
+        if isinstance(scale, (int, float)) and scale != 1.0:
+            xyz_centered = xyz_centered * scale
+        
+        # 3. 应用旋转（欧拉角，单位：弧度）
+        rx, ry, rz = rotation.get('x', 0), rotation.get('y', 0), rotation.get('z', 0)
+        R = None
+        if rx != 0 or ry != 0 or rz != 0:
+            # 构建旋转矩阵（XYZ顺序，与Three.js Euler默认顺序一致）
+            cos_x, sin_x = np.cos(rx), np.sin(rx)
+            cos_y, sin_y = np.cos(ry), np.sin(ry)
+            cos_z, sin_z = np.cos(rz), np.sin(rz)
+            
+            # 旋转矩阵 R = Rz * Ry * Rx (Three.js默认XYZ顺序)
+            Rx = np.array([
+                [1, 0, 0],
+                [0, cos_x, -sin_x],
+                [0, sin_x, cos_x]
+            ])
+            Ry = np.array([
+                [cos_y, 0, sin_y],
+                [0, 1, 0],
+                [-sin_y, 0, cos_y]
+            ])
+            Rz = np.array([
+                [cos_z, -sin_z, 0],
+                [sin_z, cos_z, 0],
+                [0, 0, 1]
+            ])
+            
+            R = Rz @ Ry @ Rx
+            xyz_centered = (R @ xyz_centered.T).T
+        
+        # 4. 移回原位置并应用平移
+        px, py, pz = position.get('x', 0), position.get('y', 0), position.get('z', 0)
+        translation = np.array([px, py, pz])
+        xyz_transformed = xyz_centered + center + translation
+        
+        # 更新点云数据
+        self.panel.splitter.xyz = xyz_transformed.astype(np.float32)
+        
+        # 更新高斯的scale参数（从原始值计算）
+        if self._original_scales is not None:
+            if isinstance(scale, (int, float)) and scale != 1.0:
+                # scales是log空间的，所以加上log(scale)
+                self.panel.splitter.scales = self._original_scales + np.log(scale)
+            else:
+                self.panel.splitter.scales = self._original_scales.copy()
+        
+        # 更新高斯的旋转四元数（从原始值计算）
+        if self._original_rotations is not None and R is not None:
+            self.panel.splitter.rotations = self._original_rotations.copy()
+            self._rotate_gaussians_quaternions(R)
+        elif self._original_rotations is not None:
+            self.panel.splitter.rotations = self._original_rotations.copy()
+        
+        print(f"[ThreeJSSplatSplitterTab] 变换已应用到点云数据: "
+              f"位移=({px:.3f}, {py:.3f}, {pz:.3f}), "
+              f"旋转=({np.degrees(rx):.1f}°, {np.degrees(ry):.1f}°, {np.degrees(rz):.1f}°), "
+              f"缩放={scale:.3f}")
+        
+        # 更新选择高亮显示
+        self._send_highlight_data()
+    
+    def reset_transform_origin(self):
+        """
+        重置变换原点 - 将当前状态设为新的原始状态
+        在用户确认变换后调用此方法
+        """
+        if hasattr(self, '_original_xyz'):
+            self._original_xyz = None
+            self._original_center = None
+            self._original_scales = None
+            self._original_rotations = None
+    
+    def _rotate_gaussians_quaternions(self, R: np.ndarray):
+        """
+        旋转高斯的四元数
+        
+        Args:
+            R: 3x3旋转矩阵
+        """
+        if not hasattr(self.panel.splitter, 'rotations') or self.panel.splitter.rotations is None:
+            return
+        
+        # 将旋转矩阵转换为四元数
+        def rotation_matrix_to_quaternion(R):
+            """将旋转矩阵转换为四元数 [w, x, y, z]"""
+            trace = np.trace(R)
+            if trace > 0:
+                s = 0.5 / np.sqrt(trace + 1.0)
+                w = 0.25 / s
+                x = (R[2, 1] - R[1, 2]) * s
+                y = (R[0, 2] - R[2, 0]) * s
+                z = (R[1, 0] - R[0, 1]) * s
+            elif R[0, 0] > R[1, 1] and R[0, 0] > R[2, 2]:
+                s = 2.0 * np.sqrt(1.0 + R[0, 0] - R[1, 1] - R[2, 2])
+                w = (R[2, 1] - R[1, 2]) / s
+                x = 0.25 * s
+                y = (R[0, 1] + R[1, 0]) / s
+                z = (R[0, 2] + R[2, 0]) / s
+            elif R[1, 1] > R[2, 2]:
+                s = 2.0 * np.sqrt(1.0 + R[1, 1] - R[0, 0] - R[2, 2])
+                w = (R[0, 2] - R[2, 0]) / s
+                x = (R[0, 1] + R[1, 0]) / s
+                y = 0.25 * s
+                z = (R[1, 2] + R[2, 1]) / s
+            else:
+                s = 2.0 * np.sqrt(1.0 + R[2, 2] - R[0, 0] - R[1, 1])
+                w = (R[1, 0] - R[0, 1]) / s
+                x = (R[0, 2] + R[2, 0]) / s
+                y = (R[1, 2] + R[2, 1]) / s
+                z = 0.25 * s
+            return np.array([w, x, y, z])
+        
+        def quaternion_multiply(q1, q2):
+            """四元数乘法 q1 * q2"""
+            w1, x1, y1, z1 = q1
+            w2, x2, y2, z2 = q2
+            return np.array([
+                w1*w2 - x1*x2 - y1*y2 - z1*z2,
+                w1*x2 + x1*w2 + y1*z2 - z1*y2,
+                w1*y2 - x1*z2 + y1*w2 + z1*x2,
+                w1*z2 + x1*y2 - y1*x2 + z1*w2
+            ])
+        
+        # 获取旋转四元数
+        rot_quat = rotation_matrix_to_quaternion(R)
+        
+        # 对每个高斯的四元数应用旋转
+        rotations = self.panel.splitter.rotations
+        for i in range(len(rotations)):
+            # 假设四元数格式为 [w, x, y, z] 或 [x, y, z, w]
+            # 3DGS通常使用 [w, x, y, z]
+            q = rotations[i]
+            rotations[i] = quaternion_multiply(rot_quat, q)
+            # 归一化
+            rotations[i] = rotations[i] / (np.linalg.norm(rotations[i]) + 1e-8)
 
 
 class GaussianSplatSplitter:
@@ -2531,7 +3009,31 @@ class GaussianSplatSplitter:
             if sh_names:
                 self.sh_coeffs = np.column_stack([vertex[name] for name in sh_names])
             
+            # 打印加载的参数统计
             print(f"[GaussianSplatSplitter] 加载PLY成功: {self.point_count} 个高斯点")
+            print(f"[GaussianSplatSplitter] 参数统计:")
+            print(f"  - 坐标: ✓ ({self.xyz.shape})")
+            if self.colors is not None:
+                print(f"  - 颜色: ✓ 范围[{self.colors.min()}, {self.colors.max()}]")
+            else:
+                print(f"  - 颜色: ✗")
+            if self.opacities is not None:
+                print(f"  - 不透明度: ✓ 范围[{self.opacities.min():.2f}, {self.opacities.max():.2f}]")
+            else:
+                print(f"  - 不透明度: ✗")
+            if self.scales is not None:
+                print(f"  - 缩放: ✓ 范围[{self.scales.min():.2f}, {self.scales.max():.2f}]")
+            else:
+                print(f"  - 缩放: ✗")
+            if self.rotations is not None:
+                print(f"  - 旋转: ✓")
+            else:
+                print(f"  - 旋转: ✗")
+            if self.sh_coeffs is not None:
+                print(f"  - 球谐系数: ✓ ({self.sh_coeffs.shape[1]} 个系数)")
+            else:
+                print(f"  - 球谐系数: ✗")
+            
             return True
             
         except Exception as e:
@@ -2739,7 +3241,7 @@ class GaussianSplatSplitter:
     
     def export_selected_points(self, indices: np.ndarray, output_path: str) -> bool:
         """
-        导出选中的高斯点到新的PLY文件（标准格式）
+        导出选中的高斯点到新的PLY文件（完整的3DGS格式，包含所有高斯参数）
         
         Args:
             indices: 选中点的索引数组
@@ -2757,17 +3259,60 @@ class GaussianSplatSplitter:
             vertex = self.ply_data['vertex']
             field_names = vertex.data.dtype.names
             
+            print(f"[GaussianSplatSplitter] 开始导出 {len(indices)} 个高斯点")
+            print(f"[GaussianSplatSplitter] 原始PLY字段: {field_names}")
+            
             # 检查是否是压缩格式
             if 'packed_position' in field_names:
                 # 压缩格式：需要转换为标准格式
+                print("[GaussianSplatSplitter] 检测到压缩格式，转换为标准3DGS格式")
                 return self._export_compressed_to_standard(indices, output_path)
             else:
-                # 标准格式：直接导出选中的点
-                new_vertex_data = vertex.data[indices]
+                # 标准格式：导出选中的点（使用变换后的坐标）
+                print("[GaussianSplatSplitter] 标准格式，导出所有高斯参数（含变换）")
+                
+                # 复制选中点的数据
+                new_vertex_data = vertex.data[indices].copy()
+                
+                # 使用变换后的坐标替换原始坐标
+                if self.xyz is not None:
+                    selected_xyz = self.xyz[indices]
+                    # 查找坐标字段名
+                    x_field = 'x' if 'x' in field_names else 'position_x' if 'position_x' in field_names else None
+                    y_field = 'y' if 'y' in field_names else 'position_y' if 'position_y' in field_names else None
+                    z_field = 'z' if 'z' in field_names else 'position_z' if 'position_z' in field_names else None
+                    
+                    if x_field and y_field and z_field:
+                        new_vertex_data[x_field] = selected_xyz[:, 0]
+                        new_vertex_data[y_field] = selected_xyz[:, 1]
+                        new_vertex_data[z_field] = selected_xyz[:, 2]
+                        print(f"[GaussianSplatSplitter] 已应用变换后的坐标")
+                
+                # 使用变换后的缩放替换原始缩放
+                if self.scales is not None and 'scale_0' in field_names:
+                    selected_scales = self.scales[indices]
+                    new_vertex_data['scale_0'] = selected_scales[:, 0]
+                    new_vertex_data['scale_1'] = selected_scales[:, 1]
+                    new_vertex_data['scale_2'] = selected_scales[:, 2]
+                    print(f"[GaussianSplatSplitter] 已应用变换后的缩放")
+                
+                # 使用变换后的旋转替换原始旋转
+                if self.rotations is not None and 'rot_0' in field_names:
+                    selected_rotations = self.rotations[indices]
+                    new_vertex_data['rot_0'] = selected_rotations[:, 0]
+                    new_vertex_data['rot_1'] = selected_rotations[:, 1]
+                    new_vertex_data['rot_2'] = selected_rotations[:, 2]
+                    new_vertex_data['rot_3'] = selected_rotations[:, 3]
+                    print(f"[GaussianSplatSplitter] 已应用变换后的旋转")
+                
                 new_vertex = PlyElement.describe(new_vertex_data, 'vertex')
                 new_ply = PlyData([new_vertex])
                 new_ply.write(output_path)
-                print(f"[GaussianSplatSplitter] 导出成功: {len(indices)} 个点 -> {output_path}")
+                
+                # 验证导出的字段
+                exported_fields = new_vertex_data.dtype.names
+                print(f"[GaussianSplatSplitter] 导出的字段: {exported_fields}")
+                print(f"[GaussianSplatSplitter] 导出成功: {len(indices)} 个完整高斯点 -> {output_path}")
                 return True
             
         except Exception as e:
@@ -2778,7 +3323,7 @@ class GaussianSplatSplitter:
     
     def _export_compressed_to_standard(self, indices: np.ndarray, output_path: str) -> bool:
         """
-        将压缩格式PLY的选中点导出为标准格式PLY
+        将压缩格式PLY的选中点导出为标准3DGS格式PLY（包含完整的高斯参数）
         
         Args:
             indices: 选中点的索引数组
@@ -2800,8 +3345,8 @@ class GaussianSplatSplitter:
             
             num_points = len(indices)
             
-            # 创建标准格式的PLY数据
-            # 基本属性：x, y, z, nx, ny, nz, f_dc_0, f_dc_1, f_dc_2, opacity, scale_0, scale_1, scale_2, rot_0, rot_1, rot_2, rot_3
+            # 创建标准3DGS格式的PLY数据
+            # 包含所有必要的高斯参数：位置、法线、球谐系数、不透明度、缩放、旋转
             dtype = [
                 ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
                 ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
@@ -2823,7 +3368,7 @@ class GaussianSplatSplitter:
             vertex_data['ny'] = 0
             vertex_data['nz'] = 0
             
-            # 颜色（从packed_color解码或使用默认值）
+            # 颜色（从原始数据或packed_color解码）
             if selected_colors is not None:
                 # 将RGB转换为球谐系数DC项
                 # SH_C0 = 0.28209479177387814
@@ -2833,49 +3378,109 @@ class GaussianSplatSplitter:
                 vertex_data['f_dc_0'] = (selected_colors[:, 0] / 255.0 - 0.5) / SH_C0
                 vertex_data['f_dc_1'] = (selected_colors[:, 1] / 255.0 - 0.5) / SH_C0
                 vertex_data['f_dc_2'] = (selected_colors[:, 2] / 255.0 - 0.5) / SH_C0
+                print(f"[GaussianSplatSplitter] 颜色转换为球谐系数: RGB范围[{selected_colors.min()}, {selected_colors.max()}]")
             else:
-                vertex_data['f_dc_0'] = 0
-                vertex_data['f_dc_1'] = 0
-                vertex_data['f_dc_2'] = 0
+                # 使用灰色作为默认颜色
+                SH_C0 = 0.28209479177387814
+                vertex_data['f_dc_0'] = (0.5 - 0.5) / SH_C0
+                vertex_data['f_dc_1'] = (0.5 - 0.5) / SH_C0
+                vertex_data['f_dc_2'] = (0.5 - 0.5) / SH_C0
+                print("[GaussianSplatSplitter] 使用默认灰色")
             
-            # 不透明度（默认值，sigmoid逆变换后约为0）
-            vertex_data['opacity'] = 0  # sigmoid(0) = 0.5
+            # 尝试从原始数据提取不透明度、缩放和旋转
+            # 这样可以保持原始模型的外观
+            has_original_params = False
             
-            # 缩放（默认值）
-            vertex_data['scale_0'] = -5.0  # exp(-5) ≈ 0.007
-            vertex_data['scale_1'] = -5.0
-            vertex_data['scale_2'] = -5.0
+            # 不透明度
+            if self.opacities is not None and len(self.opacities) > 0:
+                vertex_data['opacity'] = self.opacities[indices]
+                print(f"[GaussianSplatSplitter] 使用原始不透明度: 范围[{self.opacities[indices].min():.2f}, {self.opacities[indices].max():.2f}]")
+                has_original_params = True
+            else:
+                # 使用较小的默认值，避免过度曝光
+                vertex_data['opacity'] = 0.0  # sigmoid(0) = 0.5
+                print("[GaussianSplatSplitter] 使用默认不透明度: 0.0")
             
-            # 旋转（单位四元数）
-            vertex_data['rot_0'] = 1.0  # w
-            vertex_data['rot_1'] = 0.0  # x
-            vertex_data['rot_2'] = 0.0  # y
-            vertex_data['rot_3'] = 0.0  # z
+            # 缩放
+            if self.scales is not None and len(self.scales) > 0:
+                vertex_data['scale_0'] = self.scales[indices, 0]
+                vertex_data['scale_1'] = self.scales[indices, 1]
+                vertex_data['scale_2'] = self.scales[indices, 2]
+                print(f"[GaussianSplatSplitter] 使用原始缩放: 范围[{self.scales[indices].min():.2f}, {self.scales[indices].max():.2f}]")
+                has_original_params = True
+            else:
+                # 使用较小的默认值，避免巨大的光团
+                vertex_data['scale_0'] = -7.0  # exp(-7) ≈ 0.0009，非常小
+                vertex_data['scale_1'] = -7.0
+                vertex_data['scale_2'] = -7.0
+                print("[GaussianSplatSplitter] 使用默认缩放: -7.0 (非常小)")
             
-            # 尝试从原始压缩数据中解码更多属性
-            vertex = self.ply_data['vertex']
-            if 'packed_scale' in vertex.data.dtype.names and 'packed_rotation' in vertex.data.dtype.names:
-                self._decode_scale_rotation(vertex, indices, vertex_data)
+            # 旋转
+            if self.rotations is not None and len(self.rotations) > 0:
+                vertex_data['rot_0'] = self.rotations[indices, 0]
+                vertex_data['rot_1'] = self.rotations[indices, 1]
+                vertex_data['rot_2'] = self.rotations[indices, 2]
+                vertex_data['rot_3'] = self.rotations[indices, 3]
+                print(f"[GaussianSplatSplitter] 使用原始旋转")
+                has_original_params = True
+            else:
+                # 单位四元数
+                vertex_data['rot_0'] = 1.0  # w
+                vertex_data['rot_1'] = 0.0  # x
+                vertex_data['rot_2'] = 0.0  # y
+                vertex_data['rot_3'] = 0.0  # z
+                print("[GaussianSplatSplitter] 使用默认旋转: 单位四元数")
             
-            if 'packed_color' in vertex.data.dtype.names:
-                self._decode_opacity_from_color(vertex, indices, vertex_data)
+            if has_original_params:
+                print("[GaussianSplatSplitter] ✓ 使用原始高斯参数")
+            else:
+                print("[GaussianSplatSplitter] ⚠ 使用默认高斯参数（原始数据不可用）")
+            
+            # 如果没有原始参数，尝试从压缩数据解码
+            if not has_original_params:
+                vertex = self.ply_data['vertex']
+                
+                if 'packed_scale' in vertex.data.dtype.names and 'packed_rotation' in vertex.data.dtype.names:
+                    print("[GaussianSplatSplitter] 尝试解码压缩的缩放和旋转参数...")
+                    if self._decode_scale_rotation(vertex, indices, vertex_data):
+                        print("[GaussianSplatSplitter] ✓ 成功解码缩放和旋转")
+                    else:
+                        print("[GaussianSplatSplitter] ✗ 解码缩放和旋转失败，保持默认值")
+                
+                if 'packed_color' in vertex.data.dtype.names:
+                    print("[GaussianSplatSplitter] 尝试从packed_color解码不透明度...")
+                    if self._decode_opacity_from_color(vertex, indices, vertex_data):
+                        print("[GaussianSplatSplitter] ✓ 成功解码不透明度")
+                    else:
+                        print("[GaussianSplatSplitter] ✗ 解码不透明度失败，保持默认值")
+            
+            # 打印统计信息
+            print(f"[GaussianSplatSplitter] 导出统计:")
+            print(f"  - 点数: {num_points}")
+            print(f"  - 不透明度范围: [{vertex_data['opacity'].min():.2f}, {vertex_data['opacity'].max():.2f}]")
+            print(f"  - 缩放范围: [{vertex_data['scale_0'].min():.2f}, {vertex_data['scale_0'].max():.2f}]")
+            print(f"  - 旋转范围: [{vertex_data['rot_0'].min():.2f}, {vertex_data['rot_0'].max():.2f}]")
             
             # 创建PLY文件
             new_vertex = PlyElement.describe(vertex_data, 'vertex')
             new_ply = PlyData([new_vertex])
             new_ply.write(output_path)
             
-            print(f"[GaussianSplatSplitter] 压缩格式转标准格式导出成功: {num_points} 个点 -> {output_path}")
+            print(f"[GaussianSplatSplitter] ✓ 导出完整3DGS模型成功: {output_path}")
             return True
             
         except Exception as e:
-            print(f"[GaussianSplatSplitter] 压缩格式导出失败: {e}")
+            print(f"[GaussianSplatSplitter] ✗ 压缩格式导出失败: {e}")
             import traceback
             traceback.print_exc()
             return False
     
     def _decode_scale_rotation(self, vertex, indices, vertex_data):
-        """从packed_scale和packed_rotation解码缩放和旋转"""
+        """从packed_scale和packed_rotation解码缩放和旋转
+        
+        Returns:
+            bool: 是否解码成功
+        """
         try:
             # 获取chunk数据
             chunks = None
@@ -2885,7 +3490,8 @@ class GaussianSplatSplitter:
                     break
             
             if chunks is None:
-                return
+                print("[GaussianSplatSplitter] 未找到chunk数据")
+                return False
             
             num_chunks = len(chunks)
             POINTS_PER_CHUNK = 256
@@ -2929,11 +3535,20 @@ class GaussianSplatSplitter:
             vertex_data['rot_2'] = r2 / norm
             vertex_data['rot_3'] = r3 / norm
             
+            return True
+            
         except Exception as e:
             print(f"[GaussianSplatSplitter] 解码缩放/旋转失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def _decode_opacity_from_color(self, vertex, indices, vertex_data):
-        """从packed_color解码不透明度"""
+        """从packed_color解码不透明度
+        
+        Returns:
+            bool: 是否解码成功
+        """
         try:
             packed_color = vertex['packed_color'][indices].astype(np.uint32)
             # Alpha通道在最高8位
@@ -2941,8 +3556,12 @@ class GaussianSplatSplitter:
             # 转换为logit（sigmoid逆变换）
             alpha = np.clip(alpha, 0.001, 0.999)
             vertex_data['opacity'] = np.log(alpha / (1 - alpha))
+            return True
         except Exception as e:
             print(f"[GaussianSplatSplitter] 解码不透明度失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return False
     
     def convert_to_splat(self, ply_path: str, splat_path: str) -> bool:
         """

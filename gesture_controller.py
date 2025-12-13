@@ -44,6 +44,7 @@ class GestureController(QObject):
         self.show_window = show_window
         self.is_running = False
         self.thread = None
+        self._is_deleted = False
         
         # MediaPipe 初始化
         self.mp_hands = mp.solutions.hands
@@ -93,6 +94,18 @@ class GestureController(QObject):
         if self.thread:
             self.thread.join(timeout=1.0)
         print("[GestureController] 手势控制已停止")
+    
+    def _safe_emit(self, signal, *args):
+        """安全发送信号，处理对象已删除的情况"""
+        if self._is_deleted or not self.is_running:
+            return
+        try:
+            signal.emit(*args)
+        except RuntimeError as e:
+            # 对象已被删除或信号已断开
+            self._is_deleted = True
+            self.is_running = False
+            print(f"[GestureController] 信号发送失败，对象已删除: {e}")
         
     def _run_loop(self):
         """主循环"""
@@ -107,103 +120,123 @@ class GestureController(QObject):
             
         cap.set(cv2.CAP_PROP_FRAME_WIDTH, 640)
         cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
-            
-        while self.is_running:
-            current_time = time.time()
-            if current_time - self.last_process_time < self.process_interval:
-                time.sleep(0.005)
-                continue
-            
-            self.last_process_time = current_time
-            
-            ret, frame = cap.read()
-            if not ret:
-                continue
+        
+        try:
+            while self.is_running:
+                current_time = time.time()
+                if current_time - self.last_process_time < self.process_interval:
+                    time.sleep(0.005)
+                    continue
                 
-            frame = cv2.flip(frame, 1)
-            image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            image_rgb.flags.writeable = False
-            
-            results = self.hands.process(image_rgb)
-            image_rgb.flags.writeable = True
-            
-            # 手势处理逻辑
-            status_text = "IDLE"
-            if results.multi_hand_landmarks:
-                num_hands = len(results.multi_hand_landmarks)
+                self.last_process_time = current_time
                 
-                # 双手模式 (Zoom)
-                if num_hands == 2:
-                    h1 = results.multi_hand_landmarks[0]
-                    h2 = results.multi_hand_landmarks[1]
+                ret, frame = cap.read()
+                if not ret:
+                    continue
                     
-                    # 检查两只手是否都在捏合
-                    if self._is_pinching(h1) and self._is_pinching(h2):
-                        self.current_gesture = self.GESTURE_ZOOM
-                        status_text = "ZOOM (2 Hands Pinch)"
-                        self._process_zoom(h1, h2)
-                    else:
-                        # 如果有双手但没同时捏合，重置状态
-                        self.current_gesture = self.GESTURE_NONE
+                frame = cv2.flip(frame, 1)
+                image_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                image_rgb.flags.writeable = False
+                
+                results = self.hands.process(image_rgb)
+                image_rgb.flags.writeable = True
+                
+                # 手势处理逻辑
+                status_text = "IDLE"
+                if results.multi_hand_landmarks:
+                    num_hands = len(results.multi_hand_landmarks)
+                    
+                    # 双手模式 (Zoom)
+                    if num_hands == 2:
+                        h1 = results.multi_hand_landmarks[0]
+                        h2 = results.multi_hand_landmarks[1]
+                        
+                        # 检查两只手是否都在捏合
+                        if self._is_pinching(h1) and self._is_pinching(h2):
+                            self.current_gesture = self.GESTURE_ZOOM
+                            status_text = "ZOOM (2 Hands Pinch)"
+                            if not self._is_deleted:
+                                self._process_zoom(h1, h2)
+                        else:
+                            # 如果有双手但没同时捏合，重置状态
+                            self.current_gesture = self.GESTURE_NONE
+                            self.prev_hands_distance = None
+                            
+                    # 单手模式 (Rotate or Pan)
+                    elif num_hands == 1:
+                        hand = results.multi_hand_landmarks[0]
+                        
+                        # 重置双手距离状态
                         self.prev_hands_distance = None
                         
-                # 单手模式 (Rotate or Pan)
-                elif num_hands == 1:
-                    hand = results.multi_hand_landmarks[0]
-                    
-                    # 重置双手距离状态
+                        if self._is_pinching(hand):
+                            self.current_gesture = self.GESTURE_ROTATE
+                            status_text = "ROTATE (1 Hand Pinch)"
+                            if not self._is_deleted:
+                                self._process_rotate(hand)
+                        elif self._is_fist(hand):
+                            self.current_gesture = self.GESTURE_PAN
+                            status_text = "PAN (1 Hand Fist)"
+                            if not self._is_deleted:
+                                self._process_pan(hand)
+                        elif self._is_victory(hand):
+                            # V字手势 - 复位
+                            if self.current_gesture != self.GESTURE_RESET and not self._is_deleted:
+                                self._safe_emit(self.reset_signal)
+                            self.current_gesture = self.GESTURE_RESET
+                            status_text = "RESET (Victory)"
+                            self.prev_coords.clear()
+                        elif self._is_thumb_up(hand):
+                            # 竖大拇指 - 俯视
+                            if self.current_gesture != self.GESTURE_TOP and not self._is_deleted:
+                                self._safe_emit(self.top_view_signal)
+                            self.current_gesture = self.GESTURE_TOP
+                            status_text = "TOP VIEW (Thumb Up)"
+                            self.prev_coords.clear()
+                        else:
+                            self.current_gesture = self.GESTURE_NONE
+                            self.prev_coords.clear()
+                else:
+                    self.current_gesture = self.GESTURE_NONE
+                    self.prev_coords.clear()
                     self.prev_hands_distance = None
                     
-                    if self._is_pinching(hand):
-                        self.current_gesture = self.GESTURE_ROTATE
-                        status_text = "ROTATE (1 Hand Pinch)"
-                        self._process_rotate(hand)
-                    elif self._is_fist(hand):
-                        self.current_gesture = self.GESTURE_PAN
-                        status_text = "PAN (1 Hand Fist)"
-                        self._process_pan(hand)
-                    elif self._is_victory(hand):
-                        # V字手势 - 复位
-                        if self.current_gesture != self.GESTURE_RESET:
-                            self.reset_signal.emit()
-                        self.current_gesture = self.GESTURE_RESET
-                        status_text = "RESET (Victory)"
-                        self.prev_coords.clear()
-                    elif self._is_thumb_up(hand):
-                        # 竖大拇指 - 俯视
-                        if self.current_gesture != self.GESTURE_TOP:
-                            self.top_view_signal.emit()
-                        self.current_gesture = self.GESTURE_TOP
-                        status_text = "TOP VIEW (Thumb Up)"
-                        self.prev_coords.clear()
-                    else:
-                        self.current_gesture = self.GESTURE_NONE
-                        self.prev_coords.clear()
-            else:
-                self.current_gesture = self.GESTURE_NONE
-                self.prev_coords.clear()
-                self.prev_hands_distance = None
-                
-            # 绘制反馈
-            if self.show_window:
-                if results.multi_hand_landmarks:
-                    for landmarks in results.multi_hand_landmarks:
-                        self._draw_hand(image_rgb, landmarks)
-                
-                # 绘制状态
-                color = (0, 255, 0)
-                if self.current_gesture == self.GESTURE_ZOOM: color = (255, 0, 0)
-                elif self.current_gesture == self.GESTURE_ROTATE: color = (255, 255, 0)
-                elif self.current_gesture == self.GESTURE_PAN: color = (0, 0, 255)
-                elif self.current_gesture == self.GESTURE_RESET: color = (0, 255, 255) # Cyan
-                elif self.current_gesture == self.GESTURE_TOP: color = (255, 0, 255) # Magenta
-                
-                cv2.putText(image_rgb, f"Mode: {status_text}", (20, 50),
-                           cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
-                           
-                self.frame_signal.emit(image_rgb)
-                
-        cap.release()
+                # 绘制反馈
+                if self.show_window:
+                    if results.multi_hand_landmarks:
+                        for landmarks in results.multi_hand_landmarks:
+                            self._draw_hand(image_rgb, landmarks)
+                    
+                    # 绘制状态
+                    color = (0, 255, 0)
+                    if self.current_gesture == self.GESTURE_ZOOM: color = (255, 0, 0)
+                    elif self.current_gesture == self.GESTURE_ROTATE: color = (255, 255, 0)
+                    elif self.current_gesture == self.GESTURE_PAN: color = (0, 0, 255)
+                    elif self.current_gesture == self.GESTURE_RESET: color = (0, 255, 255) # Cyan
+                    elif self.current_gesture == self.GESTURE_TOP: color = (255, 0, 255) # Magenta
+                    
+                    cv2.putText(image_rgb, f"Mode: {status_text}", (20, 50),
+                               cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+                    
+                    # 安全发送信号，检查对象是否仍然有效
+                    self._safe_emit(self.frame_signal, image_rgb)
+                    if self._is_deleted:
+                        break
+        except RuntimeError as e:
+            # 捕获PyQt5对象已删除的异常
+            print(f"[GestureController] 线程异常（对象已删除）: {e}")
+            self._is_deleted = True
+        except Exception as e:
+            # 捕获其他异常
+            print(f"[GestureController] 线程异常: {e}")
+        finally:
+            # 确保资源被释放
+            try:
+                cap.release()
+            except:
+                pass
+            self.is_running = False
+            print("[GestureController] 手势识别线程已退出")
 
     def _process_zoom(self, h1, h2):
         """处理双手缩放"""
@@ -224,7 +257,7 @@ class GestureController(QObject):
                 # cesium_widget: positive amount = zoom in (move forward) ? 
                 # 通常: move forward = zoom in.
                 # 让我们根据之前的逻辑: "正数为放大"
-                self.zoom_signal.emit(delta * self.sensitivity_zoom * 100)
+                self._safe_emit(self.zoom_signal, delta * self.sensitivity_zoom * 100)
         
         self.prev_hands_distance = dist
         # 清除单手坐标缓存，避免模式切换时的跳变
@@ -246,7 +279,7 @@ class GestureController(QObject):
                 # 映射规则:
                 # 左右移动 (dx) -> Heading (左右旋转)
                 # 上下移动 (dy) -> Pitch (俯仰旋转)
-                self.rotate_signal.emit(dx * self.sensitivity_rotate, -dy * self.sensitivity_rotate)
+                self._safe_emit(self.rotate_signal, dx * self.sensitivity_rotate, -dy * self.sensitivity_rotate)
         
         self.prev_coords[0] = (sx, sy)
 
@@ -264,7 +297,7 @@ class GestureController(QObject):
                 # 映射: 手移动方向 = 地图移动方向
                 # 手右移 -> dx>0 -> 想要看右边的地图 -> 相机左移
                 # 或者：手右移 -> 抓着地图往右拉 -> 地图右移 -> 相机相对左移
-                self.move_signal.emit(-dx * self.sensitivity_pan, dy * self.sensitivity_pan, 0)
+                self._safe_emit(self.move_signal, -dx * self.sensitivity_pan, dy * self.sensitivity_pan, 0)
                 
         self.prev_coords[0] = (sx, sy)
 

@@ -87,13 +87,32 @@
     </script>
     
     <style>
+        :root {
+            --bg-primary: #121218;
+            --bg-secondary: #1e1e2e;
+            --bg-tertiary: #2a2a3e;
+            --bg-hover: #3d3d5c;
+            --accent-color: #8b5cf6;
+            --accent-hover: #a78bfa;
+            --accent-light: rgba(139, 92, 246, 0.15);
+            --text-primary: #e8e8f0;
+            --text-secondary: #9898b0;
+            --border-color: #3d3d5c;
+            --success-color: #22c55e;
+            --warning-color: #eab308;
+            --danger-color: #ef4444;
+        }
+        
         html, body {
             width: 100%;
             height: 100%;
             margin: 0;
             padding: 0;
             overflow: hidden;
-            font-family: sans-serif;
+            background-color: var(--bg-primary);
+            font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+            color: var(--text-primary);
+            font-size: 14px;
         }
         
         #cesiumContainer {
@@ -116,77 +135,188 @@
             pointer-events: none;
         }
         
+        /* 左侧工具栏面板 */
         #toolbar {
             position: absolute;
-            top: 10px;
-            left: 10px;
+            top: 12px;
+            left: 12px;
+            width: 300px;
             z-index: 1000;
-            background: rgba(42, 42, 42, 0.9);
-            padding: 10px;
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+            overflow: hidden;
+            max-height: calc(100vh - 100px);
+            display: flex;
+            flex-direction: column;
+            border: 1px solid var(--border-color);
+            padding: 0;
+        }
+        
+        /* 面板标题 */
+        .panel-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            user-select: none;
+        }
+        
+        .panel-header:hover {
+            background: var(--bg-hover);
+        }
+        
+        .panel-title {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-weight: 600;
+            font-size: 15px;
+        }
+        
+        .panel-title-icon {
+            width: 22px;
+            height: 22px;
+            background: var(--accent-color);
             border-radius: 5px;
-            color: white;
-            max-width: 300px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+        }
+        
+        .panel-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+        
+        .panel-content::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .panel-content::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        
+        .panel-content::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
         }
         
         .toolbar-section {
-            margin-bottom: 10px;
+            margin-bottom: 14px;
+            padding: 12px;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+        
+        .toolbar-section:last-child {
+            margin-bottom: 0;
         }
         
         .toolbar-section label {
             display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
+            margin-bottom: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            color: var(--accent-color);
         }
         
         .toolbar-section input, .toolbar-section select {
             width: 100%;
-            padding: 5px;
-            border-radius: 3px;
-            border: 1px solid #555;
-            background: #333;
-            color: white;
+            padding: 10px 12px;
+            border-radius: 6px;
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            font-size: 13px;
+            box-sizing: border-box;
+            transition: all 0.15s;
+        }
+        
+        .toolbar-section input:focus, .toolbar-section select:focus {
+            outline: none;
+            border-color: var(--accent-color);
+            box-shadow: 0 0 0 2px var(--accent-light);
+        }
+        
+        .toolbar-section input:hover, .toolbar-section select:hover {
+            border-color: var(--accent-color);
         }
         
         .toolbar-section button {
             width: 100%;
-            padding: 8px;
-            margin-top: 5px;
+            padding: 10px 14px;
+            margin-top: 8px;
             border: none;
-            border-radius: 3px;
-            background: #0E639C;
+            border-radius: 8px;
+            background: var(--accent-color);
             color: white;
             cursor: pointer;
-            font-weight: bold;
+            font-weight: 500;
+            font-size: 13px;
+            transition: all 0.15s;
         }
         
         .toolbar-section button:hover {
-            background: #1177BB;
+            background: var(--accent-hover);
         }
         
+        .toolbar-section button:active {
+            transform: scale(0.98);
+        }
+        
+        /* 底部信息面板 */
         #info-panel {
             position: absolute;
-            bottom: 10px;
-            left: 10px;
+            bottom: 14px;
+            left: 12px;
             z-index: 1000;
-            background: rgba(42, 42, 42, 0.9);
-            padding: 10px;
-            border-radius: 5px;
-            color: white;
-            font-size: 12px;
-            min-width: 200px;
+            background: var(--bg-secondary);
+            padding: 14px 16px;
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-size: 13px;
+            min-width: 220px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+            border: 1px solid var(--border-color);
         }
         
         .info-item {
-            margin: 3px 0;
+            margin: 6px 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .info-item span:first-child {
+            color: var(--text-secondary);
+        }
+        
+        .info-item span:last-child {
+            color: var(--accent-color);
+            font-weight: 600;
         }
         
         .collapsible {
             cursor: pointer;
             user-select: none;
+            padding: 8px 0;
+            margin-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
         }
         
         .collapsible:hover {
-            background: rgba(255, 255, 255, 0.1);
+            color: var(--accent-color);
         }
         
         .content {
@@ -196,6 +326,113 @@
         .content.collapsed {
             display: none;
         }
+        
+        /* 模型属性面板 */
+        #modelProperties {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            z-index: 1000;
+            background: var(--bg-secondary);
+            padding: 0;
+            border-radius: 10px;
+            color: var(--text-primary);
+            width: 300px;
+            display: none;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.5);
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+        
+        .props-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            background: var(--bg-tertiary);
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .props-header h3 {
+            margin: 0;
+            font-size: 15px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .props-close-btn {
+            width: 32px;
+            height: 32px;
+            border: none;
+            border-radius: 6px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.15s;
+        }
+        
+        .props-close-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        
+        #modelPropsContent {
+            padding: 12px;
+        }
+        
+        /* 输入组样式 */
+        .input-group {
+            margin-bottom: 8px;
+        }
+        
+        .input-group label {
+            display: block;
+            font-size: 12px;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        
+        /* 滑块样式 */
+        .slider-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        
+        .slider-row label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            min-width: 30px;
+        }
+        
+        .slider-row input[type="range"] {
+            flex: 1;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--bg-tertiary);
+            accent-color: var(--accent-color);
+            padding: 0;
+            border: none;
+        }
+        
+        .slider-row span {
+            font-size: 12px;
+            color: var(--accent-color);
+            min-width: 40px;
+            text-align: right;
+        }
+        
+        /* 轴标签颜色 */
+        .axis-x { color: #f87171; }
+        .axis-y { color: #4ade80; }
+        .axis-z { color: #60a5fa; }
     </style>
 </head>
 <body>
@@ -203,106 +440,108 @@
     <div id="threeContainer"></div>
     
     <div id="toolbar">
-        <div class="toolbar-section">
-            <h3 style="margin: 0 0 10px 0;">GSSE GIS视图</h3>
+        <div class="panel-header">
+            <div class="panel-title">
+                <div class="panel-title-icon">🌍</div>
+                <span>GIS视图</span>
+            </div>
         </div>
-        
-        <div class="toolbar-section">
-            <label>地形设置</label>
-            <select id="terrainSelect">
-                <option value="none">无地形</option>
-                <option value="world" selected>全球地形</option>
-            </select>
-        </div>
-        
-        <div class="toolbar-section">
-            <label>影像图层</label>
-            <select id="imagerySelect">
-                <option value="bing" selected>Bing Maps</option>
-                <option value="osm">OpenStreetMap</option>
-                <option value="arcgis">ArcGIS World Imagery</option>
-            </select>
-        </div>
-        
-        <div class="toolbar-section">
-            <label>相机操作</label>
-            <button onclick="resetCamera()">重置相机</button>
-        </div>
-        
-        <div class="toolbar-section">
-            <label>模型管理</label>
-            <select id="modelList" size="3" style="width: 100%; margin-bottom: 5px;" onchange="onModelSelected()">
-                <option value="">无模型</option>
-            </select>
-            <button onclick="removeSelectedModel()">删除选中模型</button>
-            <button onclick="toggleModelVisibility()">显示/隐藏</button>
+        <div class="panel-content">
+            <div class="toolbar-section">
+                <label>🗺️ 地形设置</label>
+                <select id="terrainSelect">
+                    <option value="none">无地形</option>
+                    <option value="world" selected>全球地形</option>
+                </select>
+            </div>
+            
+            <div class="toolbar-section">
+                <label>🖼️ 影像图层</label>
+                <select id="imagerySelect">
+                    <option value="bing" selected>Bing Maps</option>
+                    <option value="osm">OpenStreetMap</option>
+                    <option value="arcgis">ArcGIS World Imagery</option>
+                </select>
+            </div>
+            
+            <div class="toolbar-section">
+                <label>📦 模型管理</label>
+                <select id="modelList" size="3" onchange="onModelSelected()">
+                    <option value="">无模型</option>
+                </select>
+                <button onclick="removeSelectedModel()">删除选中模型</button>
+                <button onclick="toggleModelVisibility()">显示/隐藏</button>
+            </div>
         </div>
     </div>
     
     <!-- 模型属性控制面板 -->
-    <div id="modelProperties" style="position: absolute; top: 10px; right: 10px; z-index: 1000; background: rgba(42, 42, 42, 0.9); padding: 10px; border-radius: 5px; color: white; max-width: 300px; display: none;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-            <h3 style="margin: 0;">模型属性</h3>
-            <button onclick="closeModelProperties()" style="background: none; border: none; color: white; cursor: pointer; font-size: 16px;">✕</button>
+    <div id="modelProperties">
+        <div class="props-header">
+            <h3><span class="panel-title-icon">⚙️</span>模型属性</h3>
+            <button class="props-close-btn" onclick="closeModelProperties()">✕</button>
         </div>
         <div id="modelPropsContent">
             <div class="toolbar-section">
-                <label>位置</label>
-                <div style="margin-bottom: 5px;">
-                    <label style="font-size: 11px;">经度:</label>
-                    <input type="number" id="propLon" step="0.000001" style="width: 100%;" onchange="updateModelProperty('location')" />
+                <label>📍 位置</label>
+                <div class="input-group">
+                    <label>经度:</label>
+                    <input type="number" id="propLon" step="0.000001" onchange="updateModelProperty('location')" />
                 </div>
-                <div style="margin-bottom: 5px;">
-                    <label style="font-size: 11px;">纬度:</label>
-                    <input type="number" id="propLat" step="0.000001" style="width: 100%;" onchange="updateModelProperty('location')" />
+                <div class="input-group">
+                    <label>纬度:</label>
+                    <input type="number" id="propLat" step="0.000001" onchange="updateModelProperty('location')" />
                 </div>
-                <div style="margin-bottom: 5px;">
-                    <label style="font-size: 11px;">高度 (m):</label>
-                    <input type="number" id="propHeight" step="0.1" style="width: 100%;" onchange="updateModelProperty('location')" />
-                </div>
-            </div>
-            
-            <div class="toolbar-section">
-                <label>旋转 (弧度)</label>
-                <div style="margin-bottom: 5px;">
-                    <label style="font-size: 11px;">X轴:</label>
-                    <input type="range" id="propRotX" min="-3.14159" max="3.14159" step="0.01" value="0" style="width: 80%;" oninput="updateModelProperty('rotation')" />
-                    <span id="propRotXValue" style="font-size: 11px;">0.00</span>
-                </div>
-                <div style="margin-bottom: 5px;">
-                    <label style="font-size: 11px;">Y轴:</label>
-                    <input type="range" id="propRotY" min="-3.14159" max="3.14159" step="0.01" value="0" style="width: 80%;" oninput="updateModelProperty('rotation')" />
-                    <span id="propRotYValue" style="font-size: 11px;">0.00</span>
-                </div>
-                <div style="margin-bottom: 5px;">
-                    <label style="font-size: 11px;">Z轴:</label>
-                    <input type="range" id="propRotZ" min="-3.14159" max="3.14159" step="0.01" value="0" style="width: 80%;" oninput="updateModelProperty('rotation')" />
-                    <span id="propRotZValue" style="font-size: 11px;">0.00</span>
+                <div class="input-group">
+                    <label>高度 (m):</label>
+                    <input type="number" id="propHeight" step="0.1" onchange="updateModelProperty('location')" />
                 </div>
             </div>
             
             <div class="toolbar-section">
-                <label>缩放</label>
-                <input type="range" id="propScale" min="0.1" max="5" step="0.05" value="1" style="width: 80%;" oninput="updateModelProperty('scale')" />
-                <span id="propScaleValue">1.00</span>
+                <label>🔄 旋转 (弧度)</label>
+                <div class="slider-row">
+                    <label class="axis-x">X轴:</label>
+                    <input type="range" id="propRotX" min="-3.14159" max="3.14159" step="0.01" value="0" oninput="updateModelProperty('rotation')" />
+                    <span id="propRotXValue">0.00</span>
+                </div>
+                <div class="slider-row">
+                    <label class="axis-y">Y轴:</label>
+                    <input type="range" id="propRotY" min="-3.14159" max="3.14159" step="0.01" value="0" oninput="updateModelProperty('rotation')" />
+                    <span id="propRotYValue">0.00</span>
+                </div>
+                <div class="slider-row">
+                    <label class="axis-z">Z轴:</label>
+                    <input type="range" id="propRotZ" min="-3.14159" max="3.14159" step="0.01" value="0" oninput="updateModelProperty('rotation')" />
+                    <span id="propRotZValue">0.00</span>
+                </div>
             </div>
             
             <div class="toolbar-section">
-                <button onclick="resetModelTransform()" style="width: 100%;">重置变换</button>
-                <button onclick="flyToSelectedModel()" style="width: 100%;">飞到此模型</button>
+                <label>📐 缩放</label>
+                <div class="slider-row">
+                    <input type="range" id="propScale" min="0.1" max="5" step="0.05" value="1" oninput="updateModelProperty('scale')" />
+                    <span id="propScaleValue">1.00</span>
+                </div>
+            </div>
+            
+            <div class="toolbar-section">
+                <button onclick="resetModelTransform()">重置变换</button>
+                <button onclick="flyToSelectedModel()">飞到此模型</button>
             </div>
         </div>
     </div>
     
     <div id="info-panel">
         <div class="collapsible" onclick="toggleInfoPanel()">
-            <strong>▼ 场景信息</strong>
+            <span>📊</span>
+            <span>场景信息</span>
         </div>
         <div id="info-content" class="content">
-            <div class="info-item">相机高度: <span id="cameraHeight">-</span>m</div>
-            <div class="info-item">经度: <span id="longitude">-</span>°</div>
-            <div class="info-item">纬度: <span id="latitude">-</span>°</div>
-            <div class="info-item">已加载模型: <span id="modelCount">0</span></div>
+            <div class="info-item"><span>相机高度:</span> <span id="cameraHeight">-</span></div>
+            <div class="info-item"><span>经度:</span> <span id="longitude">-</span></div>
+            <div class="info-item"><span>纬度:</span> <span id="latitude">-</span></div>
+            <div class="info-item"><span>已加载模型:</span> <span id="modelCount">0</span></div>
         </div>
     </div>
 
@@ -336,7 +575,7 @@
         // 预先定义 receiveMessageFromPython 函数，避免未定义错误
         window.receiveMessageFromPython = function(messageStr) {
             if (!cesiumViewer) {
-                console.log('[Cesium JS Info] 收到Python消息，但viewer还未初始化，加入队列');
+                // console.log('[Cesium JS Info] 收到Python消息，但viewer还未初始化，加入队列'); // 注释掉频繁的日志输出
                 messageQueue.push(messageStr);
                 // 如果初始化重试次数过多，强制尝试初始化
                 if (initRetryCount < MAX_INIT_RETRIES) {
@@ -351,7 +590,7 @@
                     // 强制处理消息
                     if (cesiumViewer) {
                         const message = JSON.parse(messageStr);
-                        console.log('收到Python消息:', message);
+                        // console.log('收到Python消息:', message); // 注释掉频繁的日志输出
                     }
                 }
                 return;
@@ -359,7 +598,7 @@
             
             // viewer已初始化，处理消息
             const message = JSON.parse(messageStr);
-            console.log('[Cesium JS Info] 收到Python消息:', message);
+            // console.log('[Cesium JS Info] 收到Python消息:', message); // 注释掉频繁的日志输出
             
             switch(message.type) {
                 case 'load3DGS':
@@ -874,6 +1113,23 @@
 
                     const mesh = layer.splatViewer ? layer.splatViewer.getSplatMesh() : null;
                     const instanceCount = mesh && mesh.geometry ? mesh.geometry.instanceCount : null;
+                    
+                    // 如果instanceCount为0但应该有数据，尝试强制更新
+                    if (instanceCount === 0 && mesh && mesh.getSplatCount && mesh.getSplatCount() > 0) {
+                        if (!layer._forceUpdateAttempted) {
+                            console.log('[Cesium JS Info] instanceCount为0但有splats，尝试强制更新...');
+                            // 尝试强制更新geometry
+                            if (mesh.geometry && mesh.geometry.attributes) {
+                                const totalSplats = mesh.getSplatCount();
+                                mesh.geometry.instanceCount = totalSplats;
+                                if (mesh.geometry.attributes.splatIndex) {
+                                    mesh.geometry.attributes.splatIndex.needsUpdate = true;
+                                }
+                                console.log('[Cesium JS Info] 强制设置instanceCount为:', totalSplats);
+                            }
+                            layer._forceUpdateAttempted = true;
+                        }
+                    }
                     
                     if (layer._debugLogged !== true) {
                         const renderCount = (mesh && mesh.geometry && mesh.geometry.drawRange) ? mesh.geometry.drawRange.count : null;
@@ -1494,19 +1750,6 @@
                     heading: data.heading || 0,
                     pitch: data.pitch || -Cesium.Math.PI_OVER_FOUR,
                     roll: data.roll || 0
-                }
-            });
-        }
-        
-        function resetCamera() {
-            if (!cesiumViewer) return;
-            
-            cesiumViewer.camera.setView({
-                destination: Cesium.Cartesian3.fromDegrees(116.391, 39.907, 1500),
-                orientation: {
-                    heading: 0,
-                    pitch: -Cesium.Math.PI_OVER_FOUR,
-                    roll: 0
                 }
             });
         }

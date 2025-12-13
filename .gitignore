@@ -23,6 +23,7 @@ ENV/
 input/
 output/
 dataset/
+playcanvas/
 *.ply
 
 # 模型权重（超大文件，不上传）

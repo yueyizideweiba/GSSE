@@ -29,6 +29,15 @@ class CORSHTTPRequestHandler(SimpleHTTPRequestHandler):
         self.send_header('Expires', '0')
         super().end_headers()
     
+    def guess_type(self, path):
+        """重写guess_type以支持PLY文件"""
+        base, ext = os.path.splitext(path)
+        if ext.lower() == '.ply':
+            return 'application/octet-stream'
+        elif ext.lower() == '.splat':
+            return 'application/octet-stream'
+        return super().guess_type(path)
+    
     def do_OPTIONS(self):
         """处理OPTIONS请求（CORS预检）"""
         self.send_response(200)

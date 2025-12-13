@@ -2918,55 +2918,6 @@ class GSSEGUI(QMainWindow):
             gis_config_group.setLayout(gis_config_layout)
             gis_tab_layout.addWidget(gis_config_group)
             
-            # GIS导出组
-            gis_export_group = QGroupBox("模型导出")
-            gis_export_layout = QVBoxLayout()
-            
-            # 导出格式选择
-            export_format_layout = QHBoxLayout()
-            export_format_layout.addWidget(QLabel("格式:"))
-            self.gis_export_format_combo = QComboBox()
-            self.gis_export_format_combo.addItems(["点云JSON", "3D Tiles"])
-            export_format_layout.addWidget(self.gis_export_format_combo)
-            gis_export_layout.addLayout(export_format_layout)
-            
-            # 采样率
-            sample_layout = QHBoxLayout()
-            sample_layout.addWidget(QLabel("采样率:"))
-            self.gis_sample_rate_slider = QSlider(Qt.Horizontal)
-            self.gis_sample_rate_slider.setRange(1, 100)
-            self.gis_sample_rate_slider.setValue(100)
-            self.gis_sample_rate_label = QLabel("100%")
-            self.gis_sample_rate_slider.valueChanged.connect(
-                lambda v: self.gis_sample_rate_label.setText(f"{v}%")
-            )
-            sample_layout.addWidget(self.gis_sample_rate_slider)
-            sample_layout.addWidget(self.gis_sample_rate_label)
-            gis_export_layout.addLayout(sample_layout)
-            
-            # 透明度阈值
-            opacity_layout = QHBoxLayout()
-            opacity_layout.addWidget(QLabel("透明度阈值:"))
-            self.gis_opacity_threshold_slider = QSlider(Qt.Horizontal)
-            self.gis_opacity_threshold_slider.setRange(0, 100)
-            self.gis_opacity_threshold_slider.setValue(10)
-            self.gis_opacity_threshold_label = QLabel("0.10")
-            self.gis_opacity_threshold_slider.valueChanged.connect(
-                lambda v: self.gis_opacity_threshold_label.setText(f"{v/100:.2f}")
-            )
-            opacity_layout.addWidget(self.gis_opacity_threshold_slider)
-            opacity_layout.addWidget(self.gis_opacity_threshold_label)
-            gis_export_layout.addLayout(opacity_layout)
-            
-            # 导出按钮
-            self.gis_export_btn = QPushButton("导出模型")
-            self.gis_export_btn.clicked.connect(self.export_model_to_gis)
-            self.gis_export_btn.setEnabled(False)
-            gis_export_layout.addWidget(self.gis_export_btn)
-            
-            gis_export_group.setLayout(gis_export_layout)
-            gis_tab_layout.addWidget(gis_export_group)
-            
             # GIS加载组
             gis_load_group = QGroupBox("Cesium加载")
             gis_load_layout = QVBoxLayout()
@@ -3366,15 +3317,14 @@ class GSSEGUI(QMainWindow):
             self.cesium_panel = CesiumPanel()
             self.cesium_widget = self.cesium_panel.get_cesium_widget()
             
-            # 设置手势控制组件
-            if hasattr(self, 'gis_gesture_btn') and hasattr(self, 'gis_camera_label'):
-                self.cesium_panel.setup_gesture_control(self.gis_gesture_btn, self.gis_camera_label)
-            
             # 连接Cesium信号
             self.cesium_widget.viewer_ready.connect(self.on_cesium_viewer_ready)
             self.cesium_widget.load_complete.connect(self.on_cesium_load_complete)
             self.cesium_widget.object_clicked.connect(self.on_cesium_object_clicked)
             self.display_tabs.addTab(self.cesium_panel, "Cesium GIS")
+            
+            # 延迟设置手势控制组件（确保GIS标签页已创建）
+            QTimer.singleShot(100, self.setup_gis_gesture_control)
         
         # 连接标签页切换事件，当切换到SAGA标签页时自动更新可视化
         # 注意：即使SAGA不可用也要连接，以便在SAGA可用后可以正常使用
@@ -5148,26 +5098,38 @@ GSSE - Gaussian Splatting Semantic Editor
         # 右侧面板标签页顺序：模型训练(0), SAGS分割(1), SAGA分割(2), 工具(3), GIS视图(4)
         if hasattr(self, 'control_tabs') and hasattr(self, 'right_scroll'):
             if current_tab_name == "3D渲染":
-                # 3D渲染时，隐藏整个右侧面板
+                # 3D渲染时，隐藏整个右侧面板，显示编辑工具栏
                 self.right_scroll.hide()
+                if hasattr(self, 'right_edit_panel'):
+                    self.right_edit_panel.show()
             elif current_tab_name == "SAGS分割":
                 # SAGS分割时，右侧自动切换为"SAGS分割"标签页
                 self.right_scroll.show()
                 self.control_tabs.setCurrentIndex(1)  # SAGS分割
+                if hasattr(self, 'right_edit_panel'):
+                    self.right_edit_panel.hide()
             elif current_tab_name == "SAGA分割":
                 # SAGA分割时，右侧自动切换为"SAGA分割"标签页
                 self.right_scroll.show()
                 self.control_tabs.setCurrentIndex(2)  # SAGA分割
+                if hasattr(self, 'right_edit_panel'):
+                    self.right_edit_panel.hide()
             elif current_tab_name == "Cesium GIS":
                 # Cesium GIS时，右侧自动切换为"GIS视图"标签页
                 self.right_scroll.show()
                 self.control_tabs.setCurrentIndex(4)  # GIS视图
+                if hasattr(self, 'right_edit_panel'):
+                    self.right_edit_panel.hide()
             elif current_tab_name == "3D编辑":
                 # 3D编辑时，隐藏整个右侧面板
                 self.right_scroll.hide()
+                if hasattr(self, 'right_edit_panel'):
+                    self.right_edit_panel.hide()
             else:
                 # 其他情况显示右侧面板
                 self.right_scroll.show()
+                if hasattr(self, 'right_edit_panel'):
+                    self.right_edit_panel.hide()
         
         # 原有的SAGA标签页切换逻辑
         if SAGA_AVAILABLE and hasattr(self, 'saga_canvas'):
@@ -10767,6 +10729,19 @@ COLMAP输出: {colmap_output_path}
             import traceback
             self.log(f"切换坐标轴显示失败: {e}", "error")
             self.log(f"详细错误: {traceback.format_exc()}", "error")
+    
+    def setup_gis_gesture_control(self):
+        """设置GIS视图的手势控制"""
+        if not GIS_AVAILABLE or not hasattr(self, 'cesium_panel'):
+            return
+        
+        # 检查GIS标签页中的手势控制组件是否已创建
+        if hasattr(self, 'gis_gesture_btn') and hasattr(self, 'gis_camera_label'):
+            # 设置手势控制
+            self.cesium_panel.setup_gesture_control(self.gis_gesture_btn, self.gis_camera_label)
+            self.log("GIS手势控制已初始化", "info")
+        else:
+            self.log("警告: GIS手势控制组件未找到", "warning")
     
     def on_cesium_viewer_ready(self):
         """Cesium viewer准备就绪回调"""

@@ -34,6 +34,8 @@
                 if (GaussianSplats3D && typeof GaussianSplats3D.Viewer !== 'undefined') {
                     window.GaussianSplats3D = GaussianSplats3D;
                     console.log('[ThreeJS Info] GaussianSplats3D库已加载');
+                    console.log('[ThreeJS Info] GaussianSplats3D版本:', GaussianSplats3D.version || '未知');
+                    console.log('[ThreeJS Info] GaussianSplats3D.Viewer可用:', typeof GaussianSplats3D.Viewer);
                 }
             };
             document.head.appendChild(script);
@@ -888,6 +890,16 @@
         
         <div class="bottom-divider"></div>
         
+        <div class="bottom-tool-group" id="point-size-control" style="display: none;">
+            <label style="font-size: 13px; color: var(--text-secondary); margin-right: 8px;">点大小:</label>
+            <input type="range" id="point-size-slider" min="0.5" max="10" step="0.5" value="3" 
+                   style="width: 100px; accent-color: var(--accent-color);" 
+                   oninput="updatePointSize(this.value)">
+            <span id="point-size-value" style="font-size: 13px; color: var(--accent-color); margin-left: 8px; min-width: 30px;">3</span>
+        </div>
+        
+        <div class="bottom-divider"></div>
+        
         <div class="bottom-tool-group">
             <button class="bottom-btn" data-tooltip="复位视角" onclick="resetCamera()">🏠</button>
             <button class="bottom-btn danger" data-tooltip="删除选中" onclick="deleteSelected()" style="color: var(--danger-color);">🗑️</button>
@@ -991,6 +1003,7 @@
         let highlightMesh = null;
         let pointCloudOverlayMesh = null;
         let showPointCloudOverlay = false;
+        let pointCloudSize = 3;  // 点云大小
         
         // TransformControls
         let transformControls = null;
@@ -2456,6 +2469,15 @@
             });
             
             updateRenderMode();
+            
+            // 显示/隐藏点云大小控制
+            const pointSizeControl = document.getElementById('point-size-control');
+            if (pointSizeControl) {
+                // 当有点云显示时（点云渲染模式或叠加点云）显示控制
+                const hasPointCloud = (mode === 'points' || mode === 'centers' || 
+                                      (mode === 'splat' && showPointCloudOverlay));
+                pointSizeControl.style.display = hasPointCloud ? 'flex' : 'none';
+            }
         }
         
         function updateRenderMode() {
@@ -2491,6 +2513,53 @@
             if (pointCloudOverlayMesh) {
                 pointCloudOverlayMesh.visible = checked && renderMode === 'splat';
             }
+            
+            // 显示/隐藏点云大小控制
+            const pointSizeControl = document.getElementById('point-size-control');
+            if (pointSizeControl) {
+                const hasPointCloud = (renderMode === 'points' || renderMode === 'centers' || 
+                                      (renderMode === 'splat' && checked));
+                pointSizeControl.style.display = hasPointCloud ? 'flex' : 'none';
+            }
+        }
+        
+        function updatePointSize(size) {
+            pointCloudSize = parseFloat(size);
+            
+            // 更新显示的数值
+            const valueDisplay = document.getElementById('point-size-value');
+            if (valueDisplay) {
+                valueDisplay.textContent = pointCloudSize.toFixed(1);
+            }
+            
+            // 更新点云材质大小（非透视缩放）
+            if (pointCloudMesh && pointCloudMesh.material) {
+                pointCloudMesh.material.size = pointCloudSize;
+                pointCloudMesh.material.needsUpdate = true;
+            }
+            
+            // 更新叠加点云材质大小（非透视缩放）
+            if (pointCloudOverlayMesh && pointCloudOverlayMesh.material) {
+                pointCloudOverlayMesh.material.size = pointCloudSize * 0.67;  // 叠加点云稍小一些
+                pointCloudOverlayMesh.material.needsUpdate = true;
+            }
+            
+            // 更新高亮点云材质大小（非透视缩放）
+            if (highlightMesh && highlightMesh.material) {
+                // 检查是否使用透视缩放
+                if (highlightMesh.material.sizeAttenuation) {
+                    highlightMesh.material.size = pointCloudSize * 0.044;  // 透视模式
+                } else {
+                    highlightMesh.material.size = pointCloudSize * 1.33;  // 非透视模式
+                }
+                highlightMesh.material.needsUpdate = true;
+            }
+            
+            // 更新预览点云材质大小（透视缩放）
+            if (typeof previewMesh !== 'undefined' && previewMesh && previewMesh.material) {
+                previewMesh.material.size = pointCloudSize * 0.033;  // 透视模式下需要更小的值
+                previewMesh.material.needsUpdate = true;
+            }
         }
         
         function createPointCloudOverlay(data) {
@@ -2515,7 +2584,7 @@
             }
             
             const material = new THREE.PointsMaterial({
-                size: 2,
+                size: pointCloudSize * 0.67,  // 使用全局点云大小变量
                 vertexColors: colors && colors.length > 0,
                 color: colors && colors.length > 0 ? undefined : 0x00ff00,
                 transparent: true,
@@ -2554,7 +2623,7 @@
             }
             
             const material = new THREE.PointsMaterial({
-                size: 3,
+                size: pointCloudSize,  // 使用全局点云大小变量
                 vertexColors: colors && colors.length > 0,
                 color: colors && colors.length > 0 ? undefined : 0x888888,
                 transparent: false,
@@ -2588,7 +2657,7 @@
             
             const material = new THREE.PointsMaterial({
                 color: 0xffff00,
-                size: 4,
+                size: pointCloudSize * 1.33,  // 使用全局点云大小变量，高亮点稍大
                 transparent: true,
                 opacity: 0.9,
                 depthTest: false,
@@ -2980,6 +3049,15 @@
                 }
             });
             
+            // 更新预览viewer（如果存在）
+            if (previewViewer && previewViewer.update) {
+                try {
+                    previewViewer.update();
+                } catch (e) {
+                    // 忽略更新错误
+                }
+            }
+            
             // 更新变换控制器位置和大小
             if (transformHelper.visible && selectedModelId) {
                 updateTransformHelperPosition();
@@ -3095,6 +3173,9 @@
                 case 'previewSplitAsSplat':
                     previewSplitAsSplat(message.data);
                     break;
+                case 'previewSplitAsPly':
+                    previewSplitAsPly(message.data);
+                    break;
                 case 'previewSplitAsPoints':
                     previewSplitAsPoints(message.data);
                     break;
@@ -3175,12 +3256,29 @@
         let contourLines = [];
         
         function clearVisualization() {
+            // 清除轮廓线
             contourLines.forEach(line => {
                 scene.remove(line);
                 if (line.geometry) line.geometry.dispose();
                 if (line.material) line.material.dispose();
             });
             contourLines = [];
+            
+            // 清除视椎体线
+            frustumLines.forEach(line => {
+                scene.remove(line);
+                if (line.geometry) line.geometry.dispose();
+                if (line.material) line.material.dispose();
+            });
+            frustumLines = [];
+            
+            // 清除角点标记
+            cornerMarkers.forEach(marker => {
+                scene.remove(marker);
+                if (marker.geometry) marker.geometry.dispose();
+                if (marker.material) marker.material.dispose();
+            });
+            cornerMarkers = [];
         }
         
         function restoreOriginalModel() {
@@ -3222,6 +3320,145 @@
         // 预览用的临时viewer
         let previewViewer = null;
         
+        function previewSplitAsPly(data) {
+            // PLY渲染模式：直接加载PLY文件
+            clearPreview();
+            
+            const plyUrl = data.plyUrl || null;
+            
+            console.log('[ThreeJS Debug] PLY预览数据:', {
+                plyUrl: plyUrl
+            });
+            
+            if (!plyUrl) {
+                console.error('[ThreeJS Error] 没有PLY URL');
+                return;
+            }
+            
+            // 隐藏原模型和高亮
+            hideOriginalModel();
+            
+            // 使用GaussianSplats3D加载PLY文件
+            if (typeof GaussianSplats3D !== 'undefined' && GaussianSplats3D.Viewer) {
+                try {
+                    console.log('[ThreeJS Info] 开始加载预览PLY:', plyUrl);
+                    
+                    // 保存当前相机状态
+                    const savedCameraPos = camera.position.clone();
+                    const savedCameraQuat = camera.quaternion.clone();
+                    const savedTarget = target.clone();
+                    
+                    // 创建临时viewer（使用现有的renderer和camera）
+                    previewViewer = new GaussianSplats3D.Viewer({
+                        cameraUp: [0, 1, 0],
+                        initialCameraPosition: savedCameraPos.toArray(),
+                        initialCameraLookAt: savedTarget.toArray(),
+                        sharedMemoryForWorkers: false,
+                        enableSIMDInSort: false,
+                        gpuAcceleratedSort: false,
+                        integerBasedSort: false,
+                        renderer: renderer,
+                        camera: camera,
+                        useBuiltInControls: false,
+                        rootElement: null,
+                        selfDrivenMode: false,
+                        dynamicScene: false
+                    });
+                    
+                    // 加载PLY场景
+                    // 确保URL以.ply结尾，GaussianSplats3D通过扩展名识别格式
+                    let finalUrl = plyUrl;
+                    if (!plyUrl.toLowerCase().includes('.ply')) {
+                        // 如果URL中完全没有.ply，添加到路径中
+                        const urlObj = new URL(plyUrl);
+                        urlObj.pathname = urlObj.pathname + '.ply';
+                        finalUrl = urlObj.toString();
+                        console.log('[ThreeJS Info] URL已修改为包含.ply扩展名:', finalUrl);
+                    }
+                    
+                    console.log('[ThreeJS Info] 最终PLY URL:', finalUrl);
+                    
+                    // 先测试URL是否可访问
+                    console.log('[ThreeJS Info] 测试PLY文件可访问性:', finalUrl);
+                    fetch(finalUrl, { method: 'HEAD' })
+                        .then(response => {
+                            console.log('[ThreeJS Info] PLY文件HTTP状态:', response.status);
+                            console.log('[ThreeJS Info] PLY文件Content-Type:', response.headers.get('Content-Type'));
+                            console.log('[ThreeJS Info] PLY文件Content-Length:', response.headers.get('Content-Length'));
+                        })
+                        .catch(error => {
+                            console.error('[ThreeJS Error] 无法访问PLY文件:', error);
+                        });
+                    
+                    // 尝试加载PLY场景
+                    console.log('[ThreeJS Info] 调用addSplatScene，URL:', finalUrl);
+                    
+                    previewViewer.addSplatScene(finalUrl, {
+                        splatAlphaRemovalThreshold: 1,
+                        showLoadingUI: false,
+                        progressiveLoad: false,
+                        position: [0, 0, 0],
+                        rotation: [0, 0, 0, 1],
+                        scale: [1, 1, 1],
+                        streamView: false,
+                        halfPrecisionCovariancesOnGPU: true,
+                        sphericalHarmonicsDegree: 0
+                    }).then(() => {
+                        console.log('[ThreeJS Info] PLY场景加载完成');
+                        
+                        // 获取splat mesh并添加到场景
+                        if (previewViewer.splatMesh) {
+                            previewMesh = previewViewer.splatMesh;
+                            previewMesh.frustumCulled = false;
+                            scene.add(previewMesh);
+                            
+                            // 恢复相机状态
+                            camera.position.copy(savedCameraPos);
+                            camera.quaternion.copy(savedCameraQuat);
+                            target.copy(savedTarget);
+                            camera.updateProjectionMatrix();
+                            
+                            // 强制更新一次
+                            if (previewViewer.update) {
+                                previewViewer.update();
+                            }
+                            
+                            console.log('[ThreeJS Info] PLY预览加载成功, mesh可见性:', previewMesh.visible);
+                        } else {
+                            console.error('[ThreeJS Error] 无法获取splat mesh');
+                        }
+                    }).catch(error => {
+                        console.error('[ThreeJS Error] PLY预览加载失败:', error);
+                        console.error('[ThreeJS Error] 错误类型:', error.constructor.name);
+                        console.error('[ThreeJS Error] 错误消息:', error.message);
+                        if (error.stack) {
+                            console.error('[ThreeJS Error] 错误堆栈:', error.stack);
+                        }
+                        
+                        // 尝试获取更多错误信息
+                        if (error.response) {
+                            console.error('[ThreeJS Error] HTTP响应:', error.response);
+                        }
+                        
+                        // 加载失败时恢复原模型显示
+                        showOriginalModel();
+                    });
+                    
+                } catch (error) {
+                    console.error('[ThreeJS Error] 创建PLY查看器失败:', error);
+                    console.error('[ThreeJS Error] 错误详情:', error.stack);
+                    
+                    // 创建失败时恢复原模型显示
+                    showOriginalModel();
+                }
+            } else {
+                console.error('[ThreeJS Error] GaussianSplats3D库未加载');
+                showOriginalModel();
+            }
+            
+            console.log('[ThreeJS Info] 预览模式: PLY渲染');
+        }
+        
         function previewSplitAsSplat(data) {
             // Splat渲染模式：加载临时splat文件
             clearPreview();
@@ -3245,50 +3482,80 @@
                 try {
                     console.log('[ThreeJS Info] 开始加载预览splat:', splatUrl);
                     
-                    // 创建临时viewer（不附加到DOM，只用于加载splat）
+                    // 保存当前相机状态
+                    const savedCameraPos = camera.position.clone();
+                    const savedCameraQuat = camera.quaternion.clone();
+                    const savedTarget = target.clone();
+                    
+                    // 创建临时viewer（使用现有的renderer和camera）
                     previewViewer = new GaussianSplats3D.Viewer({
                         cameraUp: [0, 1, 0],
-                        initialCameraPosition: camera.position.toArray(),
-                        initialCameraLookAt: target.toArray(),
+                        initialCameraPosition: savedCameraPos.toArray(),
+                        initialCameraLookAt: savedTarget.toArray(),
                         sharedMemoryForWorkers: false,  // 禁用共享内存
-                        enableSIMDInSort: false,        // 禁用SIMD（关键！）
+                        enableSIMDInSort: false,        // 禁用SIMD
                         gpuAcceleratedSort: false,      // 禁用GPU加速排序
                         integerBasedSort: false,        // 使用浮点排序
                         renderer: renderer,             // 使用现有的renderer
                         camera: camera,                 // 使用现有的camera
                         useBuiltInControls: false,      // 不使用内置控制
-                        rootElement: null               // 不附加到DOM
+                        rootElement: null,              // 不附加到DOM
+                        selfDrivenMode: false,          // 不自动驱动
+                        dynamicScene: false             // 静态场景
                     });
                     
                     previewViewer.addSplatScene(splatUrl, {
-                        splatAlphaRemovalThreshold: 5,
+                        splatAlphaRemovalThreshold: 1,  // 降低阈值，保留更多点
                         showLoadingUI: false,
                         progressiveLoad: false,
                         position: [0, 0, 0],
                         rotation: [0, 0, 0, 1],
-                        scale: [1, 1, 1]
+                        scale: [1, 1, 1],
+                        streamView: false,
+                        halfPrecisionCovariancesOnGPU: true,  // 使用半精度减少内存
+                        sphericalHarmonicsDegree: 0  // 只使用DC项，提高性能
                     }).then(() => {
                         console.log('[ThreeJS Info] Splat场景加载完成');
                         
                         // 获取splat mesh并添加到场景
                         if (previewViewer.splatMesh) {
                             previewMesh = previewViewer.splatMesh;
+                            previewMesh.frustumCulled = false;  // 禁用视锥体剔除
                             scene.add(previewMesh);
-                            console.log('[ThreeJS Info] Splat预览加载成功');
+                            
+                            // 恢复相机状态
+                            camera.position.copy(savedCameraPos);
+                            camera.quaternion.copy(savedCameraQuat);
+                            target.copy(savedTarget);
+                            camera.updateProjectionMatrix();
+                            
+                            // 强制更新一次
+                            if (previewViewer.update) {
+                                previewViewer.update();
+                            }
+                            
+                            console.log('[ThreeJS Info] Splat预览加载成功, mesh可见性:', previewMesh.visible);
                         } else {
                             console.error('[ThreeJS Error] 无法获取splat mesh');
                         }
                     }).catch(error => {
                         console.error('[ThreeJS Error] Splat预览加载失败:', error);
                         console.error('[ThreeJS Error] 错误详情:', error.stack);
+                        
+                        // 加载失败时恢复原模型显示
+                        showOriginalModel();
                     });
                     
                 } catch (error) {
                     console.error('[ThreeJS Error] 创建Splat查看器失败:', error);
                     console.error('[ThreeJS Error] 错误详情:', error.stack);
+                    
+                    // 创建失败时恢复原模型显示
+                    showOriginalModel();
                 }
             } else {
                 console.error('[ThreeJS Error] GaussianSplats3D库未加载');
+                showOriginalModel();
             }
             
             console.log('[ThreeJS Info] 预览模式: Splat渲染');
@@ -3323,9 +3590,18 @@
             
             let hasColors = false;
             if (colors.length > 0 && colors.length === positions.length) {
-                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
+                // 确保颜色数据在0-1范围内
+                const colorArray = new Float32Array(colors.length);
+                for (let i = 0; i < colors.length; i++) {
+                    colorArray[i] = Math.max(0, Math.min(1, colors[i]));
+                }
+                geometry.setAttribute('color', new THREE.Float32BufferAttribute(colorArray, 3));
                 hasColors = true;
-                console.log('[ThreeJS Info] 设置顶点颜色成功');
+                console.log('[ThreeJS Info] 设置顶点颜色成功, 颜色范围检查:', {
+                    min: Math.min(...colorArray),
+                    max: Math.max(...colorArray),
+                    sample: [colorArray[0], colorArray[1], colorArray[2]]
+                });
             } else {
                 console.warn('[ThreeJS Warning] 颜色数据长度不匹配或为空:', {
                     positionsLength: positions.length,
@@ -3334,12 +3610,14 @@
             }
             
             const material = new THREE.PointsMaterial({
-                size: 0.08,  // 稍大一点的点，更容易看清颜色
+                size: pointCloudSize * 0.033,  // 使用全局点云大小变量，透视模式下需要更小的值
                 vertexColors: hasColors,
                 color: hasColors ? 0xffffff : 0xaaaaaa,
                 sizeAttenuation: true,
                 transparent: false,
-                opacity: 1.0
+                opacity: 1.0,
+                depthTest: true,
+                depthWrite: true
             });
             
             console.log('[ThreeJS Debug] 材质设置:', {
@@ -3349,6 +3627,7 @@
             });
             
             previewMesh = new THREE.Points(geometry, material);
+            previewMesh.frustumCulled = false;  // 禁用视锥体剔除
             scene.add(previewMesh);
             
             // 隐藏原模型和高亮
@@ -3595,7 +3874,7 @@
                     
                     const material = new THREE.PointsMaterial({
                         color: 0xffff00,  // 黄色高亮
-                        size: 0.1,  // 较小的点，更清晰
+                        size: pointCloudSize * 0.044,  // 使用全局点云大小变量，透视模式下需要更小的值，高亮稍大
                         transparent: true,
                         opacity: 1.0,  // 完全不透明
                         depthTest: true,  // 启用深度测试，更真实
@@ -3621,11 +3900,16 @@
             });
         }
         
+        // 视椎体可视化相关变量
+        let frustumLines = [];
+        let cornerMarkers = [];
+        
         function visualizeContoursFromData(data) {
             try {
                 const contours = data.contours || [];
                 const imageWidth = data.imageWidth || renderer.domElement.width;
                 const imageHeight = data.imageHeight || renderer.domElement.height;
+                const showFrustum = data.showFrustum !== false;  // 默认显示视椎体
                 
                 clearVisualization();
                 
@@ -3633,6 +3917,108 @@
                 
                 const raycaster = new THREE.Raycaster();
                 
+                // 计算四个角点用于视椎体
+                const cornerPixels = [
+                    [0, 0],                           // 左上
+                    [imageWidth, 0],                  // 右上
+                    [imageWidth, imageHeight],        // 右下
+                    [0, imageHeight]                  // 左下
+                ];
+                
+                const cornerPoints3D = [];
+                
+                // 使用射线检测计算角点的3D坐标
+                cornerPixels.forEach(pixel => {
+                    const ndcX = (pixel[0] / imageWidth) * 2 - 1;
+                    const ndcY = -((pixel[1] / imageHeight) * 2 - 1);
+                    
+                    raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
+                    
+                    // 使用固定距离或与splat mesh相交
+                    let intersectionPoint = null;
+                    
+                    // 尝试与splat mesh相交
+                    const intersects = [];
+                    sceneModels.forEach(model => {
+                        if (model.viewer && model.viewer.splatMesh && model.visible) {
+                            const meshIntersects = raycaster.intersectObject(model.viewer.splatMesh, false);
+                            intersects.push(...meshIntersects);
+                        }
+                    });
+                    
+                    if (intersects.length > 0) {
+                        // 使用最近的交点
+                        intersects.sort((a, b) => a.distance - b.distance);
+                        intersectionPoint = intersects[0].point.clone();
+                    } else {
+                        // 如果没有交点，使用固定距离
+                        const direction = raycaster.ray.direction.clone();
+                        const distance = 10;  // 默认距离
+                        intersectionPoint = camera.position.clone().add(direction.multiplyScalar(distance));
+                    }
+                    
+                    cornerPoints3D.push(intersectionPoint);
+                });
+                
+                // 绘制视椎体（如果启用）
+                if (showFrustum && cornerPoints3D.length === 4) {
+                    // 1. 绘制从相机到四个角点的射线（绿色）
+                    const rayMaterial = new THREE.LineBasicMaterial({
+                        color: 0x00ff00,
+                        linewidth: 2,
+                        transparent: true,
+                        opacity: 0.6
+                    });
+                    
+                    cornerPoints3D.forEach((cornerPoint, idx) => {
+                        const rayGeometry = new THREE.BufferGeometry().setFromPoints([
+                            camera.position.clone(),
+                            cornerPoint
+                        ]);
+                        const rayLine = new THREE.Line(rayGeometry, rayMaterial);
+                        scene.add(rayLine);
+                        frustumLines.push(rayLine);
+                    });
+                    
+                    // 2. 绘制四个角点形成的矩形边框（青色）
+                    const frameMaterial = new THREE.LineBasicMaterial({
+                        color: 0x00ffff,
+                        linewidth: 3,
+                        transparent: true,
+                        opacity: 0.8
+                    });
+                    
+                    const framePoints = [
+                        cornerPoints3D[0],
+                        cornerPoints3D[1],
+                        cornerPoints3D[2],
+                        cornerPoints3D[3],
+                        cornerPoints3D[0]  // 闭合
+                    ];
+                    
+                    const frameGeometry = new THREE.BufferGeometry().setFromPoints(framePoints);
+                    const frameLine = new THREE.Line(frameGeometry, frameMaterial);
+                    scene.add(frameLine);
+                    frustumLines.push(frameLine);
+                    
+                    // 3. 在四个角点位置添加红色球体标记
+                    const markerGeometry = new THREE.SphereGeometry(0.15, 16, 16);
+                    const markerMaterial = new THREE.MeshBasicMaterial({
+                        color: 0xff0000,
+                        transparent: false
+                    });
+                    
+                    cornerPoints3D.forEach((cornerPoint, idx) => {
+                        const marker = new THREE.Mesh(markerGeometry, markerMaterial);
+                        marker.position.copy(cornerPoint);
+                        scene.add(marker);
+                        cornerMarkers.push(marker);
+                    });
+                    
+                    console.log('[ThreeJS Info] 视椎体可视化完成: 4个角点, 4条射线, 1个矩形框');
+                }
+                
+                // 绘制轮廓线
                 contours.forEach((contour, contourIdx) => {
                     if (!contour || contour.length < 3) return;
                     
@@ -3647,9 +4033,24 @@
                         
                         raycaster.setFromCamera(new THREE.Vector2(ndcX, ndcY), camera);
                         
-                        const direction = raycaster.ray.direction.clone();
-                        const distance = 8;
-                        const intersectionPoint = camera.position.clone().add(direction.multiplyScalar(distance));
+                        // 尝试与splat mesh相交
+                        const intersects = [];
+                        sceneModels.forEach(model => {
+                            if (model.viewer && model.viewer.splatMesh && model.visible) {
+                                const meshIntersects = raycaster.intersectObject(model.viewer.splatMesh, false);
+                                intersects.push(...meshIntersects);
+                            }
+                        });
+                        
+                        let intersectionPoint;
+                        if (intersects.length > 0) {
+                            intersects.sort((a, b) => a.distance - b.distance);
+                            intersectionPoint = intersects[0].point.clone();
+                        } else {
+                            const direction = raycaster.ray.direction.clone();
+                            const distance = 8;
+                            intersectionPoint = camera.position.clone().add(direction.multiplyScalar(distance));
+                        }
                         
                         contour3D.push(intersectionPoint);
                     }
@@ -3669,8 +4070,11 @@
                         contourLines.push(line);
                     }
                 });
+                
+                console.log('[ThreeJS Info] 轮廓可视化完成:', contours.length, '个轮廓');
             } catch (error) {
                 console.error('[ThreeJS Error] 可视化轮廓失败:', error);
+                console.error(error.stack);
             }
         }
         
